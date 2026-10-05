@@ -11,7 +11,7 @@
 // WORKER SOSEM fogja el - azok mindig közvetlenül a hálózatra mennek.
 // ============================================================================
 
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 const CACHE_NAME = `jelenleti-iv-v${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -95,13 +95,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2) config.js: hálózat-első (rövid időkorláttal), tartalékként a gyorsítótár.
+  // 2) config.js: hálózat-első, és VALÓBAN megkerüli a böngésző saját HTTP-
+  //    gyorsítótárát is (cache: 'reload'), nem csak a Cache Storage-unkat -
+  //    enélkül egy sima fetch() még mindig visszaadhatna egy, a böngésző által
+  //    korábban (a service workertől teljesen függetlenül) eltárolt, elavult
+  //    választ anélkül, hogy ténylegesen hálózatra menne. Rövid időkorláttal,
+  //    hiba esetén a saját gyorsítótárunk a tartalék.
   if (NETWORK_FIRST.some((p) => url.pathname.endsWith(p))) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME);
         try {
-          const res = await fetchWithTimeout(req, 3000);
+          const freshReq = new Request(req, { cache: 'reload' });
+          const res = await fetchWithTimeout(freshReq, 3000);
           if (res && res.ok) cache.put(req, res.clone());
           return res;
         } catch (e) {
