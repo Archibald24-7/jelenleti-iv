@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jelenléti Ív Kezelő</title>
+<meta name="theme-color" content="#9c6b2e">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+
+<!-- Microsoft Authentication Library (MSAL) v3 - a projektbe csomagolva (js/vendor),
+     így verziózott, és offline indításnál sem függ külső CDN-től.
+     Licenc: MIT (lásd js/vendor/LICENSE-msal-browser.txt). -->
+<script src="js/vendor/msal-browser.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;color:var(--ink-500);font-family:sans-serif;">
+    Betöltés…
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
