@@ -11,7 +11,7 @@
 // WORKER SOSEM fogja el - azok mindig közvetlenül a hálózatra mennek.
 // ============================================================================
 
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 const CACHE_NAME = `jelenleti-iv-v${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -28,6 +28,7 @@ const PRECACHE = [
   './js/autoCheckin.js',
   './js/views.js',
   './js/datePicker.js',
+  './js/timeField.js',
   './js/vendor/msal-browser.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

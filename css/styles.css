@@ -558,26 +558,38 @@ a { color: var(--brass-600); }
 
 /* ---------- Saját dátumválasztó (magyar formátum, hétfővel kezdődő hét) ---------- */
 
-.date-field { width: 100%; }
-.date-field-trigger {
+.date-field {
   width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 11px;
+  align-items: stretch;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--paper-50);
-  color: var(--ink-900);
+}
+.date-field:focus-within { outline: 2px solid var(--brass-600); outline-offset: 1px; }
+.date-field .date-field-input {
+  flex: 1;
+  min-width: 0;
+  border: none !important;
+  background: transparent !important;
+  padding: 9px 4px 9px 11px !important;
   font-family: var(--font-mono);
   font-size: 13.5px;
-  cursor: pointer;
-  text-align: left;
+  outline: none;
 }
-.date-field-trigger:hover { background: var(--paper-0); }
-.date-field-trigger.dp-empty { color: var(--ink-500); font-family: var(--font-sans); }
-.date-field-icon { color: var(--ink-500); flex-shrink: 0; display: flex; }
+.date-field .date-field-input.invalid { color: var(--err-600); }
+.date-field:has(.date-field-input.invalid) { border-color: var(--err-600); }
+.date-field-icon-btn {
+  border: none;
+  background: none;
+  color: var(--ink-500);
+  padding: 0 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: 0 8px 8px 0;
+}
+.date-field-icon-btn:hover { color: var(--brass-600); background: var(--paper-0); }
 
 .dp-popup {
   position: fixed;
@@ -590,7 +602,22 @@ a { color: var(--brass-600); }
   padding: 12px;
 }
 .dp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.dp-title { font-weight: 600; font-size: 13.5px; }
+.dp-title {
+  font-weight: 600; font-size: 13.5px; color: var(--ink-900);
+  background: none; border: 1px solid transparent; border-radius: 6px;
+  padding: 3px 10px; cursor: pointer; font-family: inherit;
+}
+.dp-title:hover { background: var(--paper-0); border-color: var(--line); }
+.dp-title-static { cursor: default; }
+.dp-title-static:hover { background: none; border-color: transparent; }
+.dp-pick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0 2px; }
+.dp-pick {
+  padding: 12px 0; border: 1px solid transparent; background: none; border-radius: 8px;
+  font-size: 13px; color: var(--ink-900); cursor: pointer; font-family: var(--font-mono);
+}
+.dp-pick:hover { background: var(--paper-0); border-color: var(--line); }
+.dp-pick.dp-today { border-color: var(--brass-600); font-weight: 600; }
+.dp-pick.dp-selected { background: var(--brass-600); border-color: var(--brass-600); color: #fff; }
 .dp-nav {
   width: 26px; height: 26px;
   border-radius: 6px; border: 1px solid transparent; background: none;
@@ -790,18 +817,74 @@ select { padding: 9px 11px; border: 1px solid var(--line-strong); border-radius:
 
 /* ---------- Nyomtatás: a bejegyzéslista kinyomtatható "jelenléti ívként" ---------- */
 
+/* ---------- Szegmentált 24 órás időmező (fix kettősponttal) ---------- */
+
+.time-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--paper-50);
+}
+.time-field:focus-within { outline: 2px solid var(--brass-600); outline-offset: 1px; }
+.time-seg-wrap { display: flex; align-items: center; gap: 2px; }
+.time-field .time-seg-input {
+  width: 2.3ch;
+  min-width: 34px;
+  padding: 7px 0 !important;
+  border: none !important;
+  background: transparent !important;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  outline: none;
+}
+.time-colon { font-family: var(--font-mono); font-size: 16px; color: var(--ink-500); user-select: none; }
+.time-seg-steppers { display: flex; flex-direction: column; }
+.time-step {
+  width: 24px; height: 17px; line-height: 1; padding: 0;
+  border: none; background: none; color: var(--ink-500);
+  font-size: 9px; cursor: pointer; border-radius: 4px;
+}
+.time-step:hover { background: var(--paper-0); color: var(--brass-600); }
+@media (max-width: 760px) {
+  .time-step { width: 30px; height: 20px; font-size: 11px; }
+}
+
 .print-only { display: none; }
+.print-table { display: none; }
 @media print {
-  body { background: #fff; color: #000; font-size: 12px; }
+  @page { margin: 12mm; }
+  body { background: #fff; color: #000; font-size: 10px; }
   .sidebar, .bottom-nav, .btn, .icon-btn, .filter-bar, .sync-banner, .toast-host,
-  .no-print-actions, .modal-overlay, .ledger-actions, .ledger-select, .bulk-bar { display: none !important; }
+  .no-print-actions, .modal-overlay, .ledger, .bulk-bar, .stat-row, .empty-state { display: none !important; }
   .print-only { display: block; }
-  .print-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+  .print-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
   .main { padding: 0; max-width: none; }
   .app-shell { display: block; }
-  .ledger { border: 1px solid #999; border-radius: 0; }
-  .ledger-row { break-inside: avoid; border-color: #bbb; padding: 6px 8px; }
-  .ledger-row.header { background: #eee; color: #000; }
-  .stat-box { border-color: #999; }
   .card { box-shadow: none; }
+
+  /* Minden bejegyzés egy sor; a fejléc minden oldalon megismétlődik. */
+  .print-table {
+    display: table;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5px;
+    line-height: 1.25;
+  }
+  .print-table thead { display: table-header-group; }
+  .print-table tfoot { display: table-footer-group; }
+  .print-table th, .print-table td {
+    border: 1px solid #888;
+    padding: 2px 5px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .print-table th { background: #e8e8e8; font-weight: 600; }
+  .print-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-table td.nowrap { white-space: nowrap; }
+  .print-table td.mono { font-family: var(--font-mono); }
+  .print-table tfoot td { font-weight: 600; background: #f3f3f3; }
 }

@@ -14,7 +14,6 @@ Windows/Android eszközön nem volt tesztelve. A kódot alapos automatikus teszt
 (lásd `test/` mappa a forrás-csomagban, ha kéred) és böngésző-szimulációval ellenőriztem,
 de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szívesen segítek.
 
--
 ---
 
 ## Tartalomjegyzék
@@ -282,16 +281,28 @@ a biztonsági mentés/CSV-export fájlneveit érintené). Az idő mindig 24 ór�
 app hetekben gondolkodik (a véletlen generátor heti célkitűzése), a hét **hétfővel**
 kezdődik.
 
-A natív böngésző-dátumválasztók (és az idő-választók) megjelenése a böngésző/OS
-nyelvi beállítását követik, és ezt egy weboldal CSS-sel/HTML-lel nem tudja
-felülírni - ezért az app **saját, beépített naptár-komponenst** használ minden
-dátummezőnél (bejegyzés-űrlap, véletlen generátor, szűrősáv): mindig hétfővel
-kezdődő héttel, éééé.hh.nn. formátummal, függetlenül attól, milyen nyelvre van
-állítva a böngésződ/Windowsod. A hétvégék és a magyar munkaszüneti napok halvány
-piros színnel vannak kiemelve a naptárban. Ugyanezen okból az időmezők (kezdés,
-befejezés) is sima, szabadon beírható "ÓÓ:PP" szövegmezők lettek a natív időválasztó
-helyett - ott ugyanis a de./du. kontra 24 órás megjelenítés szintén a böngésző
-nyelvétől függene.
+A natív böngésző-dátum- és időválasztók megjelenése a böngésző/OS nyelvi
+beállítását követi, és ezt egy weboldal nem tudja felülírni - ezért az app
+**saját, beépített dátum- és időmezőket** használ:
+
+- **Dátummező**: szabadon begépelhető (csak a számjegyeket kell írni, a pontokat a
+  mező magától beszúrja: `20160315` → `2016.03.15.`; a `/` jel is elfogadott
+  elválasztó), VAGY a mező melletti naptár-ikonnal választható. A naptár hétfővel
+  kezdődik, a hétvégék és magyar munkaszüneti napok halvány pirossal vannak
+  jelölve. **Gyors lapozás:** a naptár fejlécére (hónap + év) kattintva hónap-,
+  még egyszer kattintva évválasztó rács nyílik (12 évenként lapozható), így pl.
+  10 évvel korábbra 3-4 kattintással el lehet jutni. Nem létező dátumot (pl.
+  2026.02.30.) a mező piros jelöléssel elutasít.
+- **Időmező**: két külön számjegyes szegmens (óra 0–23, perc 0–59) FIX
+  kettősponttal, mindig 24 órás. Gépelhető (két számjegy után magától a percre
+  ugrik; pl. egyetlen `9` beírása is `09`-et ad), és a ▲/▼ gombokkal (vagy a
+  fel/le nyilakkal) körbeforgatható (23 után 0, 59 után 0). Telefonon számbillentyűzet
+  jelenik meg, a kettőspontot soha nem kell begépelni.
+
+**Nyomtatás**: a nyomtatási nézet külön, tömör táblázat - egy bejegyzés egy sor
+(dátum, kezdés, vége, időtartam, forrás, megjegyzés egymás mellett), a fejléc
+minden oldalon megismétlődik, alul összesítő sor van. Csak az éppen szűrt
+bejegyzéseket tartalmazza.
 
 ## Ismert korlátok – olvasd el, mielőtt bevezeted
 

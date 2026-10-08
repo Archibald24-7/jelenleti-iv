@@ -15,6 +15,7 @@ import {
   todayDateStr, formatMonthHu, formatDateTimeHu, matchesTextFilter,
 } from './models.js';
 import { dateFieldHtml, wireDateFields, closeAnyOpenCalendar } from './datePicker.js';
+import { timeFieldHtml, wireTimeFields } from './timeField.js';
 
 const HU_MONTHS_SHORT = [
   'január', 'február', 'március', 'április', 'május', 'június',
@@ -579,6 +580,33 @@ export function renderEntries(container, opts) {
               </div>
             </div>`).join('')}
         </div>`}
+
+    ${list.length === 0 ? '' : `
+    <table class="print-table">
+      <thead>
+        <tr>
+          ${isAdminView ? '<th>Felhasználó</th>' : ''}
+          <th>Dátum</th><th>Kezdés</th><th>Vége</th><th>Időtartam</th><th>Forrás</th><th>Megjegyzés</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list.map((e) => `
+        <tr>
+          ${isAdminView ? `<td>${esc(userById[e.userId] ? userById[e.userId].name : '—')}</td>` : ''}
+          <td class="nowrap">${esc(formatDateHu(e.date, { withWeekday: true }))}</td>
+          <td class="nowrap mono">${esc(e.startTime)}</td>
+          <td class="nowrap mono">${esc(e.endTime || '')}</td>
+          <td class="nowrap mono">${esc(formatDuration(durationMinutes(e)))}</td>
+          <td class="nowrap">${esc(sourceLabel(e.source))}</td>
+          <td>${esc(e.note || '')}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="${isAdminView ? 7 : 6}">Összesen: ${esc(formatDuration(totalMinutes))} · ${workDays} munkanap · ${list.length} bejegyzés</td>
+        </tr>
+      </tfoot>
+    </table>`}
   `;
 
   const on = (sel, ev, fn) => { const el = container.querySelector(sel); if (el) el.addEventListener(ev, fn); };
@@ -687,8 +715,8 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
           : `<input type="hidden" name="userId" value="${esc(e.userId || defaultUserId)}">`}
         <div class="field"><label>Dátum</label>${dateFieldHtml({ name: 'date', value: e.date, ariaLabel: 'Dátum' })}</div>
         <div class="field-row">
-          <div class="field"><label>Kezdés (24 órás, ÓÓ:PP)</label><input type="text" inputmode="numeric" name="startTime" value="${esc(e.startTime || '')}" placeholder="08:00" required></div>
-          <div class="field"><label>Vége (üresen hagyható, ha még tart)</label><input type="text" inputmode="numeric" name="endTime" value="${esc(e.endTime || '')}" placeholder="16:30"></div>
+          <div class="field"><label>Kezdés (24 órás)</label>${timeFieldHtml({ name: 'startTime', value: e.startTime || '', ariaLabel: 'Kezdés' })}</div>
+          <div class="field"><label>Vége (üresen hagyható, ha még tart)</label>${timeFieldHtml({ name: 'endTime', value: e.endTime || '', ariaLabel: 'Befejezés' })}</div>
         </div>
         <div class="field"><label>Megjegyzés</label><textarea name="note">${esc(e.note || '')}</textarea></div>
         <div class="form-error" hidden></div>
@@ -701,6 +729,7 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
   });
 
   wireDateFields(overlay);
+  wireTimeFields(overlay);
   const form = overlay.querySelector('#entry-form');
   const del = overlay.querySelector('#btn-delete-in-modal');
   if (del) del.addEventListener('click', () => { close(); onDelete(entry.id); });
@@ -710,8 +739,8 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
     const data = Object.fromEntries(new FormData(form).entries());
     const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date || '')) return showFormError(form, 'Válassz dátumot.');
-    if (!TIME_RE.test(data.startTime || '')) return showFormError(form, 'Add meg a kezdés időpontját 24 órás ÓÓ:PP formátumban (pl. 08:00).');
-    if (data.endTime && !TIME_RE.test(data.endTime)) return showFormError(form, 'Add meg a befejezés időpontját 24 órás ÓÓ:PP formátumban (pl. 16:30), vagy hagyd üresen.');
+    if (!TIME_RE.test(data.startTime || '')) return showFormError(form, 'Add meg a kezdés időpontját (óra és perc).');
+    if (data.endTime && !TIME_RE.test(data.endTime)) return showFormError(form, 'A befejezés időpontját óra és perc megadásával add meg, vagy hagyd üresen.');
     if (data.endTime) {
       if (data.endTime === data.startTime) return showFormError(form, 'A kezdés és a befejezés időpontja nem lehet azonos.');
       if (data.endTime < data.startTime &&
@@ -746,8 +775,8 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
           <div class="field"><label>Eddig a napig</label>${dateFieldHtml({ name: 'toDate', value: today, ariaLabel: 'Eddig a napig' })}</div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Kezdés – tól (ÓÓ:PP)</label><input type="text" inputmode="numeric" name="startFrom" value="08:00" placeholder="08:00" required></div>
-          <div class="field"><label>Kezdés – ig (ÓÓ:PP)</label><input type="text" inputmode="numeric" name="startTo" value="09:00" placeholder="09:00" required></div>
+          <div class="field"><label>Kezdés – tól</label>${timeFieldHtml({ name: 'startFrom', value: '08:00', ariaLabel: 'Kezdés tól' })}</div>
+          <div class="field"><label>Kezdés – ig</label>${timeFieldHtml({ name: 'startTo', value: '09:00', ariaLabel: 'Kezdés ig' })}</div>
         </div>
         <div class="field-row">
           <div class="field"><label>Napi min. munkaidő (óra)</label><input type="number" name="minDurationHours" min="0" max="24" step="0.25" value="7" required></div>
@@ -784,6 +813,7 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
   });
 
   wireDateFields(overlay);
+  wireTimeFields(overlay);
   const form = overlay.querySelector('#random-form');
   const quotaSelect = overlay.querySelector('#quota-period-select');
   const quotaFields = overlay.querySelector('#quota-fields');
@@ -811,7 +841,7 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
     if (d.fromDate > d.toDate) return showFormError(form, 'A kezdő dátum nem lehet későbbi, mint a záró dátum.');
     const days = Math.round((new Date(d.toDate) - new Date(d.fromDate)) / 86400000) + 1;
     if (days > 366) return showFormError(form, 'Egyszerre legfeljebb 366 napot lehet generálni.');
-    if (!TIME_RE.test(d.startFrom) || !TIME_RE.test(d.startTo)) return showFormError(form, 'Add meg a kezdés-tartományt 24 órás ÓÓ:PP formátumban (pl. 08:00).');
+    if (!TIME_RE.test(d.startFrom) || !TIME_RE.test(d.startTo)) return showFormError(form, 'Add meg a kezdés-tartomány mindkét időpontját (óra és perc).');
     if (d.startFrom > d.startTo) return showFormError(form, 'A kezdés tartománya hibás: a „tól” későbbi, mint az „ig”.');
     if (d.minDurationHours <= 0 || d.maxDurationHours <= 0) return showFormError(form, 'A munkaidőnek pozitívnak kell lennie.');
     if (d.minDurationHours > d.maxDurationHours) return showFormError(form, 'A minimum munkaidő nem lehet nagyobb a maximumnál.');

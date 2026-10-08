@@ -78,7 +78,7 @@ function makeEntry(cfg, date, durationMins) {
     source: 'random',
     deviceId: cfg.deviceId || '',
     deviceName: cfg.deviceName || '',
-    note: '',//'Automatikusan generált időpont',
+    note: 'Automatikusan generált időpont',
   });
 }
 
