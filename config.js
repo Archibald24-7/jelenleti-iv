@@ -11,7 +11,7 @@ export const CONFIG = {
   // A megosztott OneDrive mappa MEGOSZTÁSI LINKJE (szerkesztési joggal!).
   // README → "2. lépés: megosztott OneDrive mappa"
   // Példa: 'https://1drv.ms/f/s!Abc123...' vagy '...-my.sharepoint.com/:f:/g/...'
-  sharedFolderLink: 'https://humanmachinekft24-my.sharepoint.com/:f:/g/personal/skovran_adam_humanmachine_hu/IgDyjYSct2M5RrtcCsBgzEEeAfD6RQiIB21GY-SHz121Ycg?e=yfbDHJ',
+  sharedFolderLink: 'https://humanmachinekft24-my.sharepoint.com/:f:/g/personal/skovran_adam_humanmachine_hu/IgDyjYSct2M5RrtcCsBgzEEeATjdNrMqmWrfaOM-o6NksVA',
 
   // A szinkronizált adatfájl neve a megosztott mappában. Alapesetben nem kell módosítani.
   dataFileName: 'jelenleti-adatok.json',
