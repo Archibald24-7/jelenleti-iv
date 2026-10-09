@@ -14,7 +14,7 @@ Windows/Android eszközön nem volt tesztelve. A kódot alapos automatikus teszt
 (lásd `test/` mappa a forrás-csomagban, ha kéred) és böngésző-szimulációval ellenőriztem,
 de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szívesen segítek.
 
----
+----
 
 ## Tartalomjegyzék
 
