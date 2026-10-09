@@ -36,7 +36,7 @@ export function detectLaunchContext() {
  * Ha indokolt, létrehoz egy automatikus bejegyzést a mai napra ezen az eszközön.
  * @returns {Promise<object|null>} az újonnan létrehozott bejegyzés, vagy null, ha nem kellett.
  */
-export async function maybeAutoCheckin({ userId, deviceId, deviceName }) {
+export async function maybeAutoCheckin({ userId, deviceId, deviceName, breakMinutes = 0 }) {
   const enabled = await DB.getMeta('autoCheckinEnabled', true);
   if (enabled === false) return null;
 
@@ -60,6 +60,7 @@ export async function maybeAutoCheckin({ userId, deviceId, deviceName }) {
     startTime: nowTimeStr(),
     endTime: null,
     source: isAutostart ? 'auto-login' : 'auto-app-open',
+    breakMinutes, // a felhasználó aznapra érvényes levonása (lásd models.resolveBreakMinutes)
     deviceId,
     deviceName,
     note: '',

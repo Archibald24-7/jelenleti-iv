@@ -29,7 +29,7 @@ const state = {
   syncState: { status: 'idle', error: null, needsLogin: false },
   currentView: 'dashboard',
   selectedUserId: null,
-  filters: { year: '', month: '', fromDate: '', toDate: '', source: '', text: '' },
+  filters: { year: '', month: '', fromDate: '', toDate: '', source: '', breakMin: '', text: '' },
   selectedEntryIds: new Set(),
   deviceId: '',
   deviceName: '',
@@ -66,6 +66,22 @@ function guessDeviceName() {
   return 'Ismeretlen eszköz';
 }
 
+/** Az adott felhasználóra és napra érvényes levonás (perc) a felhasználó szabályai szerint. */
+function resolveBreakFor(userId, dateStr) {
+  const user = state.users.find((u) => u.id === userId) || (state.currentUser && state.currentUser.id === userId ? state.currentUser : null);
+  return Models.resolveBreakMinutes(user ? user.breakRules : [], dateStr);
+}
+
+/** Kézi-jelző: igaz, ha a bejegyzés levonása eltér a szabályból adódótól. Szerkesztésnél, ha a
+ * levonás értéke nem változott, a korábbi jelző marad (így egy régi bejegyzés megnyitása és
+ * mentése nem "kézi" jelölésűvé teszi). */
+function computeBreakManual(existing, userId, date, newBreak) {
+  const ruleValue = resolveBreakFor(userId, date);
+  if (!existing) return newBreak !== ruleValue;
+  if (newBreak !== Models.entryBreak(existing)) return newBreak !== ruleValue;
+  return !!existing.breakManual;
+}
+
 async function computePendingCount() {
   const all = [...state.users, ...state.entries];
   if (!state.lastSyncedAt) return all.length;
@@ -75,6 +91,11 @@ async function computePendingCount() {
 async function loadLocalData() {
   state.users = await DB.getAllUsers();
   state.entries = await DB.getAllEntries();
+  if (state.currentUser) {
+    // szinkron után a más eszközön módosított adatok (pl. levonási szabályok) is látszanak
+    const fresh = state.users.find((u) => u.id === state.currentUser.id && !u.deleted);
+    if (fresh) state.currentUser = fresh;
+  }
   state.lastSyncedAt = await DB.getMeta('lastSyncedAt', null);
   state.pendingCount = await computePendingCount();
 }
@@ -305,6 +326,7 @@ async function afterIdentityResolved() {
     userId: state.currentUser.id,
     deviceId: state.deviceId,
     deviceName: state.deviceName,
+    breakMinutes: resolveBreakFor(state.currentUser.id, Models.todayDateStr()),
   });
   if (entry) await loadLocalData();
 
@@ -404,6 +426,7 @@ function renderDashboardView(content) {
         startTime: Models.nowTimeStr(),
         endTime: null,
         source: 'manual',
+        breakMinutes: resolveBreakFor(state.currentUser.id, Models.todayDateStr()),
         deviceId: state.deviceId,
         deviceName: state.deviceName,
       });
@@ -462,7 +485,7 @@ function renderEntriesView(content, isAdminView) {
       }
     },
     onClearFilters: () => {
-      state.filters = { year: '', month: '', fromDate: '', toDate: '', source: '', text: '' };
+      state.filters = { year: '', month: '', fromDate: '', toDate: '', source: '', breakMin: '', text: '' };
       renderApp();
     },
     onExportCsv: (list) => exportCsv(list, isAdminView),
@@ -491,9 +514,19 @@ function openBulkEditModal(isAdminView) {
   Views.renderBulkEditModal({
     count: targetIds.length,
     onApply: async (changes) => {
+      const { breakMode, breakMinutes, ...plain } = changes;
       for (const id of targetIds) {
         const existing = state.entries.find((e) => e.id === id);
-        if (existing) await DB.putEntry(Models.touchEntry(existing, changes));
+        if (!existing) continue;
+        const patch = { ...plain };
+        if (breakMode === 'rules') {
+          patch.breakMinutes = resolveBreakFor(existing.userId, existing.date);
+          patch.breakManual = false;
+        } else if (breakMode === 'custom') {
+          patch.breakMinutes = breakMinutes;
+          patch.breakManual = breakMinutes !== resolveBreakFor(existing.userId, existing.date);
+        }
+        await DB.putEntry(Models.touchEntry(existing, patch));
       }
       state.selectedEntryIds = new Set();
       await afterMutation();
@@ -528,18 +561,23 @@ function openEntryModal(entry, isAdminView) {
     users: state.users,
     isAdmin: isAdmin && isAdminView,
     defaultUserId: (isAdmin && isAdminView && state.selectedUserId) || state.currentUser.id,
+    resolveBreak: (userId, date) => resolveBreakFor(userId, date),
     onSave: async (data) => {
       if (data.id) {
         const existing = state.entries.find((e) => e.id === data.id);
         if (!existing) return;
         const updated = Models.touchEntry(existing, {
           date: data.date, startTime: data.startTime, endTime: data.endTime, note: data.note, userId: data.userId,
+          breakMinutes: data.breakMinutes,
+          breakManual: computeBreakManual(existing, data.userId, data.date, data.breakMinutes),
         });
         await DB.putEntry(updated);
       } else {
         const created = Models.createEntry({
           userId: data.userId, date: data.date, startTime: data.startTime, endTime: data.endTime,
           note: data.note, source: 'manual', deviceId: state.deviceId, deviceName: state.deviceName,
+          breakMinutes: data.breakMinutes,
+          breakManual: computeBreakManual(null, data.userId, data.date, data.breakMinutes),
         });
         await DB.putEntry(created);
       }
@@ -572,6 +610,7 @@ function openRandomModal(isAdminView) {
     users: state.users,
     isAdmin: isAdmin && isAdminView,
     defaultUserId: (isAdmin && isAdminView && state.selectedUserId) || state.currentUser.id,
+    breakRulesByUser: Object.fromEntries(state.users.map((u) => [u.id, u.breakRules || []])),
     onGenerate: async (cfg) => {
       const targetUserId = cfg.userId || state.currentUser.id;
       if (cfg.overwrite) {
@@ -589,9 +628,12 @@ function openRandomModal(isAdminView) {
         return true;
       });
       const newEntries = RandomGen.generateForDateRange(
-        { ...cfg, userId: targetUserId, deviceId: state.deviceId, deviceName: state.deviceName },
         {
-          existingEntriesForUser: remainingForUser.map((e) => ({ date: e.date, startTime: e.startTime, endTime: e.endTime })),
+          ...cfg, userId: targetUserId, deviceId: state.deviceId, deviceName: state.deviceName,
+          breakRules: (state.users.find((u) => u.id === targetUserId) || {}).breakRules || [],
+        },
+        {
+          existingEntriesForUser: remainingForUser.map((e) => ({ date: e.date, startTime: e.startTime, endTime: e.endTime, breakMinutes: e.breakMinutes })),
           overwrite: cfg.overwrite,
         }
       );
@@ -614,6 +656,48 @@ function renderAdminUsersView(content) {
     onAdd: () => openUserModal(null),
     onEdit: (user) => openUserModal(user),
     onToggleActive: (id) => toggleUserActive(id),
+    onEditBreaks: (user) => openBreakRulesModal(user),
+  });
+}
+
+/** Szünet-levonási szabályok szerkesztése (saját: Beállítások; admin: bárkié a Felhasználók oldalon). */
+function openBreakRulesModal(user) {
+  if (!user) return;
+  Views.renderBreakRulesModal({
+    user,
+    onSave: async (rules, applyExisting) => {
+      const prevUser = user;
+      const updatedUser = Models.touchUser(prevUser, { breakRules: rules });
+      await DB.putUser(updatedUser);
+
+      // Meglévő bejegyzések újraszámolása az új szabályok szerint (a kézzel módosítottak kimaradnak)
+      const changedBefore = [];
+      if (applyExisting) {
+        for (const e of state.entries) {
+          if (e.deleted || e.userId !== user.id || e.breakManual) continue;
+          const wanted = Models.resolveBreakMinutes(rules, e.date);
+          if (wanted !== Models.entryBreak(e)) {
+            changedBefore.push(e);
+            await DB.putEntry(Models.touchEntry(e, { breakMinutes: wanted }));
+          }
+        }
+      }
+      await afterMutation();
+      Views.showToast(
+        applyExisting
+          ? `Levonási szabályok mentve, ${changedBefore.length} meglévő bejegyzés frissítve.`
+          : 'Levonási szabályok mentve.',
+        'success',
+        {
+          actionLabel: 'Visszavonás',
+          onAction: async () => {
+            await DB.putUser(Models.touchUser(prevUser, { breakRules: prevUser.breakRules || [] }));
+            for (const e of changedBefore) await DB.putEntry(Models.touchEntry(e, { breakMinutes: Models.entryBreak(e) }));
+            await afterMutation();
+          },
+        }
+      );
+    },
   });
 }
 
@@ -666,6 +750,8 @@ function renderSettingsView(content) {
     canInstall: state.canInstall,
     isIos: state.isIos,
     isWindows: state.isWindows,
+    breakRules: state.currentUser.breakRules || [],
+    onEditBreaks: () => openBreakRulesModal(state.currentUser),
     autostartCommand: buildAutostartCommand(),
     onSyncNow: () => runSync({ interactive: true }),
     onLogout: async () => { await Auth.logout(); location.reload(); },
@@ -713,14 +799,16 @@ function renderSettingsView(content) {
 function exportCsv(list, isAdminView) {
   const userById = Object.fromEntries(state.users.map((u) => [u.id, u.name]));
   const header = isAdminView
-    ? ['Felhasználó', 'Dátum', 'Kezdés', 'Vége', 'Időtartam (perc)', 'Forrás', 'Megjegyzés']
-    : ['Dátum', 'Kezdés', 'Vége', 'Időtartam (perc)', 'Forrás', 'Megjegyzés'];
+    ? ['Felhasználó', 'Dátum', 'Kezdés', 'Vége', 'Bruttó idő (perc)', 'Levonás (perc)', 'Ledolgozott idő (perc)', 'Forrás', 'Megjegyzés']
+    : ['Dátum', 'Kezdés', 'Vége', 'Bruttó idő (perc)', 'Levonás (perc)', 'Ledolgozott idő (perc)', 'Forrás', 'Megjegyzés'];
   const rows = list.map((e) => {
     const base = [
       Models.formatDateHu(e.date, { withWeekday: false }),
       e.startTime,
       e.endTime || '',
       String(Models.durationMinutes(e) ?? ''),
+      String(Models.entryBreak(e)),
+      String(Models.workedMinutes(e) ?? ''),
       Views.sourceLabel(e.source),
       e.note || '',
     ];

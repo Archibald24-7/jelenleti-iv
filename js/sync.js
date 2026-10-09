@@ -23,7 +23,7 @@
 
 import * as Auth from './auth.js';
 import * as DB from './db.js';
-import { mergeById, nowISO } from './models.js';
+import { mergeById, nowISO, normalizeBreakRules } from './models.js';
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const SCHEMA_VERSION = 1;
@@ -171,8 +171,17 @@ export function sanitizeRemote(data) {
       RE_DATE.test(e.date || '') && RE_TIME.test(e.startTime || '') &&
       (e.endTime === null || e.endTime === undefined || e.endTime === '' || RE_TIME.test(e.endTime)) &&
       typeof e.updatedAt === 'string'
-  ).map((e) => ({ ...e, endTime: e.endTime || null }));
-  return { ...data, users, entries };
+  ).map((e) => {
+    const brk = Number(e.breakMinutes);
+    return {
+      ...e,
+      endTime: e.endTime || null,
+      // régebbi bejegyzéseknél a mező hiányzik -> 0 perc levonás
+      breakMinutes: Number.isFinite(brk) && brk > 0 ? Math.round(brk) : 0,
+      breakManual: !!e.breakManual,
+    };
+  });
+  return { ...data, users: users.map((u) => ({ ...u, breakRules: normalizeBreakRules(u.breakRules) })), entries };
 }
 
 export function mergeData(local, remoteData) {

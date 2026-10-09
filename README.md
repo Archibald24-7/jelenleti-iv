@@ -46,6 +46,11 @@ de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szí
   feltöltve), és szabad szöveges keresés a megjegyzésekben (részleges
   egyezéssel, `*` joker-karakterrel bővíthetően). A nyomtatás és a
   CSV-exportálás mindig csak az éppen szűrt listát exportálja.
+- **Munkaközi szünet levonása**: felhasználónként, tetszőleges számú dátumtartománnyal
+  (pl. 20 perc 2024.02.01–10. között, 30 perc 2024.02.11-től). A bejegyzés sorában
+  látszik a levonás, a ledolgozott idő = (vége − kezdés) − levonás; szűrhető és
+  tömegesen szerkeszthető. A véletlen generátor a valós munkaidőt tartja a megadott
+  sávban, a levonást a záró időponthoz adja.
 - **Tömeges kijelölés és műveletek**: a bejegyzés-sorok elején lévő
   jelölőnégyzetekkel (vagy a fejléc "összes kijelölése" dobozával) egyszerre
   több bejegyzés is kiválasztható, majd tömegesen szerkeszthető (Forrás és/vagy
@@ -272,6 +277,36 @@ bejegyzések, admin nézetek, véletlen generátor) anélkül, hogy bármit be k
 
 ---
 
+## Munkaközi szünet levonása
+
+**Hol állítható be?** Mindenki a saját szabályait a *Beállítások → Szünet-levonás*
+kártyán, az admin bárkiét a *Felhasználók* listában (óra-ikon a sor végén; az oszlop
+az aznapra érvényes értéket mutatja). Egy szabály: *ettől* – *eddig* – *levonandó perc*.
+Az üres „ettől” = kezdettől, az üres „eddig” = nincs vége. **Átfedő időszakoknál a később
+kezdődő szabály érvényes**; ahol egy szabály sem illik a napra, a levonás 0 perc.
+Az értékek szabadon szerkeszthetők, az app nem ellenőrzi őket jogszabály szerint.
+
+**Mi történik a bejegyzésekkel?**
+- Minden bejegyzés eltárolja a rá érvényes levonást (`breakMinutes`). Új bejegyzésnél
+  (kézi, automatikus, generált) ez a bejegyzés dátuma szerinti szabályból töltődik ki;
+  a kézi űrlapon felülírható, és élőben kiírja a ledolgozott időt.
+- **Ledolgozott idő = (vége − kezdés) − levonás.** A levonás utólagos átírása
+  (bejegyzésen vagy tömegesen) azonnal újraszámol mindent: a listát, az összesítőket,
+  a nyomtatást és az exportot.
+- A szabályok mentésekor választható, hogy a **meglévő bejegyzések** levonása is frissüljön
+  az új szabályok szerint (alapból igen). A *kézzel módosított* levonású bejegyzéseket
+  (sorban `*` jelöli) ez nem írja felül; a mentés után „Visszavonás” is elérhető.
+- **Szűrés:** a „Levonás” legördülő csak a ténylegesen előforduló értékeket kínálja.
+- **Tömeges szerkesztés:** a levonás egyedi értékre állítható, vagy a felhasználó
+  szabályai szerint újraszámoltatható (ez a `*` jelölést is törli).
+
+**Véletlen generátor:** a megadott min./max. munkaidő a **valós, levonás utáni** idő.
+A generátor napról napra az érvényes szabály szerinti szünetet adja a záró időponthoz
+(pl. 8:00 kezdés, 8 óra valós munka, 20 perc levonás → 16:20 vége; 11-e után 30 perc → 16:30).
+A heti/havi célóraszám is a valós munkaidőre vonatkozik, és a meglévő bejegyzések valós
+órái számítanak az alapba. A generátor ablaka kiírja a kiválasztott felhasználó szabályait.
+A CSV-export a bruttó időt, a levonást és a ledolgozott időt külön oszlopban adja.
+
 ## Dátum- és időformátum
 
 Az app mindenhol a magyar sorrendet követi: **év.hónap.nap.** (pl. `2026.09.29.`),
@@ -407,11 +442,14 @@ jelenleti-iv-kezelo/
   "schemaVersion": 1,
   "users": [
     { "id": "...", "name": "Kovács János", "email": "janos@example.com",
-      "role": "admin", "active": true, "createdAt": "...", "updatedAt": "...", "deleted": false }
+      "role": "admin", "active": true,
+      "breakRules": [ { "id": "...", "from": "2024-02-01", "to": "2024-02-10", "minutes": 20 },
+                      { "id": "...", "from": "2024-02-11", "to": "", "minutes": 30 } ],
+      "createdAt": "...", "updatedAt": "...", "deleted": false }
   ],
   "entries": [
     { "id": "...", "userId": "...", "date": "2026-09-29", "startTime": "08:14",
-      "endTime": "16:47", "source": "auto-login", "deviceId": "...", "deviceName": "Windows gép",
+      "endTime": "16:47", "breakMinutes": 30, "breakManual": false, "source": "auto-login", "deviceId": "...", "deviceName": "Windows gép",
       "note": "", "createdAt": "...", "updatedAt": "...", "deleted": false }
   ],
   "updatedAt": "..."

@@ -24,7 +24,9 @@
 //     próbálkozzon" pontosan találni.
 // ============================================================================
 
-import { addDays, isWeekend, isHungarianHoliday, getWeekStart, createEntry, durationMinutes } from './models.js';
+import {
+  addDays, isWeekend, isHungarianHoliday, getWeekStart, createEntry, durationMinutes, resolveBreakMinutes,
+} from './models.js';
 
 function timeToMinutes(t) {
   const [h, m] = t.split(':').map(Number);
@@ -67,18 +69,23 @@ function groupKeyFor(date, quotaPeriod) {
   return '__flat__';
 }
 
-function makeEntry(cfg, date, durationMins) {
+/** `workedMins`: a VALÓS (levonás utáni) ledolgozott idő. A záró időpont = kezdés + ledolgozott idő
+ * + az adott napra érvényes levonandó szünet, így a valós munkaidő pontosan a megadott sávban marad. */
+function makeEntry(cfg, date, workedMins) {
+  const breakMins = resolveBreakMinutes(cfg.breakRules, date);
   const startTime = randomInRange(cfg.startFrom, cfg.startTo);
-  const endTime = minutesToTime(timeToMinutes(startTime) + durationMins);
+  const endTime = minutesToTime(timeToMinutes(startTime) + workedMins + breakMins);
   return createEntry({
     userId: cfg.userId,
     date,
     startTime,
     endTime,
+    breakMinutes: breakMins,
+    breakManual: false,
     source: 'random',
     deviceId: cfg.deviceId || '',
     deviceName: cfg.deviceName || '',
-    note: '',//'Automatikusan generált időpont',
+    note: 'Automatikusan generált időpont',
   });
 }
 
@@ -91,8 +98,10 @@ function makeEntry(cfg, date, durationMins) {
  * @param {string} cfg.toDate 'YYYY-MM-DD'
  * @param {string} cfg.startFrom 'HH:MM' - kezdés tartomány eleje
  * @param {string} cfg.startTo 'HH:MM' - kezdés tartomány vége
- * @param {number} cfg.minDurationHours - napi minimum munkaidő (óra, lehet tizedes)
- * @param {number} cfg.maxDurationHours - napi maximum munkaidő (óra, lehet tizedes)
+ * @param {number} cfg.minDurationHours - napi minimum VALÓS (levonás utáni) munkaidő (óra, lehet tizedes)
+ * @param {number} cfg.maxDurationHours - napi maximum VALÓS (levonás utáni) munkaidő (óra, lehet tizedes)
+ * @param {Array} [cfg.breakRules] - a felhasználó levonási szabályai ({from,to,minutes}); a generátor
+ *   napról napra az érvényes szabály szerinti szünetet adja a záró időponthoz
  * @param {boolean} [cfg.skipWeekends]
  * @param {boolean} [cfg.skipHolidays] - magyar munkaszüneti napok kihagyása
  * @param {'none'|'weekly'|'monthly'} [cfg.quotaPeriod] - kvóta-alapú elosztás időegysége
@@ -102,7 +111,7 @@ function makeEntry(cfg, date, durationMins) {
  * @param {string} [cfg.deviceName]
  *
  * @param {object} context
- * @param {Array<{date:string, startTime:string, endTime:string|null}>} context.existingEntriesForUser
+ * @param {Array<{date:string, startTime:string, endTime:string|null, breakMinutes?:number}>} context.existingEntriesForUser
  *   A felhasználó azon bejegyzései, amik a generálás UTÁN is megmaradnak (tehát ha
  *   overwrite=true, a hívónak ELŐBB törölnie/tombstone-olnia kell az érintett
  *   tartományban lévőket, és csak az ez UTÁNI állapotot kell ideadnia). Ez egyszerre
@@ -152,7 +161,9 @@ export function generateForDateRange(cfg, context) {
     const key = groupKeyFor(e.date, quotaPeriod);
     const group = groups.get(key);
     if (!group) continue; // ez a hét/hónap nincs érintve a mostani generálásban
-    group.baselineMinutes += (e.endTime ? durationMinutes({ startTime: e.startTime, endTime: e.endTime }) : 0) || 0;
+    // a kvóta a VALÓS (levonás utáni) ledolgozott időre vonatkozik
+    const gross = e.endTime ? durationMinutes({ startTime: e.startTime, endTime: e.endTime }) : 0;
+    group.baselineMinutes += Math.max(0, (gross || 0) - (Number(e.breakMinutes) > 0 ? Math.round(Number(e.breakMinutes)) : 0));
   }
 
   const targetMinutes = Math.round((cfg.quotaTargetHours || 0) * 60);

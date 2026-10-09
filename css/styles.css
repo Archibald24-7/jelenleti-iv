@@ -314,6 +314,7 @@ a { color: var(--brass-600); }
 .ledger-date { width: 168px; flex-shrink: 0; font-size: 13.5px; }
 .ledger-time { width: 130px; flex-shrink: 0; }
 .ledger-time .sep { color: var(--ink-300); padding: 0 4px; }
+.ledger-break { width: 92px; flex-shrink: 0; color: var(--ink-500); font-size: 13px; }
 .ledger-duration { width: 110px; flex-shrink: 0; color: var(--ink-500); font-size: 13px; }
 .ledger-source { flex-shrink: 0; }
 .ledger-note { flex: 1; color: var(--ink-500); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -678,6 +679,7 @@ a { color: var(--brass-600); }
 .col-email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .col-role { width: 90px; flex-shrink: 0; }
 .col-state { width: 90px; flex-shrink: 0; }
+.col-break { width: 90px; flex-shrink: 0; }
 
 /* ---------- Mobil: a bejegyzéssorok "kártya-szerűen" tördelődnek ---------- */
 
@@ -690,6 +692,7 @@ a { color: var(--brass-600); }
       "select user    actions"
       "select date    actions"
       "select time    time"
+      "select break   break"
       "select duration duration"
       "select source  source"
       "select note    note";
@@ -700,6 +703,7 @@ a { color: var(--brass-600); }
   .ledger-user { grid-area: user; width: auto; font-weight: 500; }
   .ledger-date { grid-area: date; width: auto; }
   .ledger-time { grid-area: time; width: auto; }
+  .ledger-break { grid-area: break; width: auto; }
   .ledger-duration { grid-area: duration; width: auto; }
   .ledger-source { grid-area: source; }
   .ledger-note { grid-area: note; white-space: normal; }
@@ -711,12 +715,14 @@ a { color: var(--brass-600); }
     grid-template-areas:
       "name    actions"
       "email   actions"
-      "role    state";
+      "role    state"
+      "break   break";
   }
   .user-row .col-name { grid-area: name; width: auto; font-weight: 500; }
   .user-row .col-email { grid-area: email; }
   .user-row .col-role { grid-area: role; width: auto; }
   .user-row .col-state { grid-area: state; width: auto; }
+  .user-row .col-break { grid-area: break; width: auto; }
 
   .hero-time { font-size: 34px; }
   .filter-bar .field { flex: 1; min-width: 140px; }
@@ -887,4 +893,31 @@ select { padding: 9px 11px; border: 1px solid var(--line-strong); border-radius:
   .print-table td.nowrap { white-space: nowrap; }
   .print-table td.mono { font-family: var(--font-mono); }
   .print-table tfoot td { font-weight: 600; background: #f3f3f3; }
+}
+
+/* ---------- Szünet-levonás ---------- */
+
+.manual-mark { color: var(--brass-600); font-weight: 600; margin-left: 2px; cursor: help; }
+.worked-preview { font-size: 13px; color: var(--ink-700); margin: -4px 0 12px; min-height: 1.2em; font-family: var(--font-mono); }
+.break-summary {
+  background: var(--brass-100);
+  border: 1px solid var(--brass-400);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+.break-list { margin: 6px 0 12px; padding-left: 18px; font-size: 13px; }
+.break-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 110px auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 4px;
+}
+.break-row .icon-btn { margin-bottom: 14px; }
+@media (max-width: 760px) {
+  .break-row { grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px; }
+  .break-row .break-min { grid-column: 1; }
+  .break-row .icon-btn { grid-column: 2; justify-self: end; }
 }

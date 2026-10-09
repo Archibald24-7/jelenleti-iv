@@ -47,6 +47,7 @@ export function createUser({ name, email, role = 'user' }) {
     email: (email || '').trim().toLowerCase(),
     role,
     active: true,
+    breakRules: [], // munkaközi szünet levonási szabályok (lásd normalizeBreakRules)
     createdAt: ts,
     updatedAt: ts,
     deleted: false,
@@ -70,6 +71,8 @@ export function createEntry({
   source = 'manual',
   deviceId = '',
   deviceName = '',
+  breakMinutes = 0,
+  breakManual = false,
   note = '',
 }) {
   const ts = nowISO();
@@ -80,6 +83,8 @@ export function createEntry({
     startTime,
     endTime,
     source, // 'auto-login' | 'auto-app-open' | 'manual' | 'random'
+    breakMinutes, // a munkaidőből levonandó szünet (perc)
+    breakManual, // true: kézzel beállított levonás (a szabályok újraalkalmazása nem írja felül)
     deviceId,
     deviceName,
     note: (note || '').trim(),
@@ -101,6 +106,87 @@ export function durationMinutes(entry) {
   let mins = (eh * 60 + em) - (sh * 60 + sm);
   if (mins < 0) mins += 24 * 60; // éjfélen átnyúló műszak esetére
   return mins;
+}
+
+/** Az adott bejegyzés levonandó szünete percben (hiányzó/érvénytelen érték = 0). */
+export function entryBreak(entry) {
+  const n = Number(entry && entry.breakMinutes);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+/** LEDOLGOZOTT idő percben: (befejezés - kezdés) - levonandó szünet. Nyitott bejegyzésnél null.
+ * Mindig innen számolunk, így a levonás utólagos módosítása azonnal újraszámol mindent. */
+export function workedMinutes(entry) {
+  const gross = durationMinutes(entry);
+  if (gross == null) return null;
+  return Math.max(0, gross - entryBreak(entry));
+}
+
+// ---------------------------------------------------------------------------
+// MUNKAKÖZI SZÜNET LEVONÁSI SZABÁLYOK – felhasználónként, dátumtartományokkal.
+// Egy szabály: { id, from, to, minutes }. Üres `from` = "kezdettől", üres `to` =
+// "nincs vége" (folyamatban). Átfedés esetén a KÉSŐBB kezdődő szabály érvényes.
+// ---------------------------------------------------------------------------
+
+const RE_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function normalizeBreakRules(rules) {
+  return (Array.isArray(rules) ? rules : [])
+    .map((r) => {
+      const minutes = Number(r && r.minutes);
+      return {
+        id: r && typeof r.id === 'string' && r.id ? r.id : uuid(),
+        from: r && RE_ISO_DATE.test(r.from || '') ? r.from : '',
+        to: r && RE_ISO_DATE.test(r.to || '') ? r.to : '',
+        minutes: Number.isFinite(minutes) ? Math.min(1440, Math.max(0, Math.round(minutes))) : null,
+      };
+    })
+    .filter((r) => r.minutes !== null)
+    .sort((a, b) => (a.from || '').localeCompare(b.from || '') || (a.to || '\uffff').localeCompare(b.to || '\uffff'));
+}
+
+/** A megadott napra érvényes levonás (perc); ha egy szabály sem illik rá, 0. */
+export function resolveBreakMinutes(rules, dateStr) {
+  let best = null;
+  let bestIdx = -1;
+  (rules || []).forEach((r, i) => {
+    if (r.from && dateStr < r.from) return;
+    if (r.to && dateStr > r.to) return;
+    const better =
+      best === null ||
+      (r.from || '') > (best.from || '') ||
+      ((r.from || '') === (best.from || '') && i > bestIdx);
+    if (better) { best = r; bestIdx = i; }
+  });
+  return best ? best.minutes : 0;
+}
+
+/** Az űrlap sorainak ({from,to,minutes}) ellenőrzése. -> { rules } vagy { error } */
+export function validateBreakRules(rows) {
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const n = i + 1;
+    const from = r.from || '';
+    const to = r.to || '';
+    if (r.fromInvalid || r.toInvalid) return { error: `${n}. sor: érvénytelen dátum.` };
+    if (from && to && from > to) return { error: `${n}. sor: a kezdő dátum nem lehet későbbi a záró dátumnál.` };
+    const raw = String(r.minutes == null ? '' : r.minutes).trim();
+    if (raw === '' || !/^\d+$/.test(raw)) return { error: `${n}. sor: add meg a levonandó percet (egész szám).` };
+    const minutes = Number(raw);
+    if (minutes > 600) return { error: `${n}. sor: a levonandó idő legfeljebb 600 perc lehet.` };
+    out.push({ id: r.id || uuid(), from, to, minutes });
+  }
+  return { rules: normalizeBreakRules(out) };
+}
+
+/** A szabályok olvasható, soronkénti leírása (megjelenítéshez). */
+export function describeBreakRules(rules) {
+  return (rules || []).map((r) => {
+    const from = r.from ? formatDateHu(r.from) : 'kezdettől';
+    const to = r.to ? formatDateHu(r.to) : 'folyamatban';
+    return `${r.minutes} perc: ${from} – ${to}`;
+  });
 }
 
 export function formatDuration(minutes) {

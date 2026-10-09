@@ -11,7 +11,7 @@
 // WORKER SOSEM fogja el - azok mindig közvetlenül a hálózatra mennek.
 // ============================================================================
 
-const CACHE_VERSION = 6;
+const CACHE_VERSION = 7;
 const CACHE_NAME = `jelenleti-iv-v${CACHE_VERSION}`;
 
 const PRECACHE = [

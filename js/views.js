@@ -13,6 +13,7 @@
 import {
   formatDateHu, formatDuration, durationMinutes, escapeHtml as esc,
   todayDateStr, formatMonthHu, formatDateTimeHu, matchesTextFilter,
+  workedMinutes, entryBreak, describeBreakRules, resolveBreakMinutes, validateBreakRules,
 } from './models.js';
 import { dateFieldHtml, wireDateFields, closeAnyOpenCalendar } from './datePicker.js';
 import { timeFieldHtml, wireTimeFields } from './timeField.js';
@@ -58,6 +59,7 @@ const byNewest = (a, b) => (b.date + b.startTime).localeCompare(a.date + a.start
 
 const ICONS = {
   dashboard: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   entries: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M17 14.2c2.6.2 4.5 2 4.5 5.3"/>',
   calendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h2M14 14h2M8 18h2"/>',
@@ -321,12 +323,12 @@ export function renderDashboard(container, { user, entries, syncState, onCheckIn
   const todayClosed = mine.filter((e) => e.date === today && e.endTime).sort(byNewest);
 
   const todayMinutes =
-    mine.filter((e) => e.date === today).reduce((sum, e) => sum + (durationMinutes(e) || 0), 0) +
-    (openToday ? minutesSince(openToday.startTime) : 0);
+    mine.filter((e) => e.date === today).reduce((sum, e) => sum + (workedMinutes(e) || 0), 0) +
+    (openToday ? Math.max(0, minutesSince(openToday.startTime) - entryBreak(openToday)) : 0);
   const monthPrefix = today.slice(0, 7);
   const monthMinutes =
-    mine.filter((e) => e.date.startsWith(monthPrefix)).reduce((sum, e) => sum + (durationMinutes(e) || 0), 0) +
-    (openToday ? minutesSince(openToday.startTime) : 0);
+    mine.filter((e) => e.date.startsWith(monthPrefix)).reduce((sum, e) => sum + (workedMinutes(e) || 0), 0) +
+    (openToday ? Math.max(0, minutesSince(openToday.startTime) - entryBreak(openToday)) : 0);
 
   const recent = [...mine].sort(byNewest).slice(0, 5);
 
@@ -391,7 +393,7 @@ export function renderDashboard(container, { user, entries, syncState, onCheckIn
           <div class="ledger-row">
             <div class="ledger-date">${esc(formatDateHu(e.date, { withWeekday: false }))}</div>
             <div class="ledger-time mono">${esc(e.startTime)}<span class="sep">–</span>${esc(e.endTime || '…')}</div>
-            <div class="ledger-duration mono">${esc(formatDuration(durationMinutes(e)))}</div>
+            <div class="ledger-duration mono">${esc(formatDuration(workedMinutes(e)))}</div>
             <div class="ledger-source"><span class="source-tag">${esc(sourceLabel(e.source))}</span></div>
           </div>`).join('')}</div>`}
   `;
@@ -411,7 +413,14 @@ export function renderDashboard(container, { user, entries, syncState, onCheckIn
 // BEJEGYZÉSEK (saját, vagy admin-nézetben bárkié)
 // ---------------------------------------------------------------------------
 
-const EMPTY_FILTERS = { year: '', month: '', fromDate: '', toDate: '', source: '', text: '' };
+/** A levonás cellája egy bejegyzés-sorban: "−30 perc", vagy "—"; a * a kézzel beállított értéket jelzi. */
+function breakCellHtml(e) {
+  const b = entryBreak(e);
+  const mark = e.breakManual ? '<span class="manual-mark" title="Kézzel beállított levonás">*</span>' : '';
+  return `<div class="ledger-break mono">${b ? `−${b} perc` : '—'}${mark}</div>`;
+}
+
+const EMPTY_FILTERS = { year: '', month: '', fromDate: '', toDate: '', source: '', breakMin: '', text: '' };
 
 function scopeEntries({ entries, isAdminView, selectedUserId, currentUserId }) {
   let list = entries.filter((e) => !e.deleted);
@@ -434,6 +443,7 @@ export function applyEntryFilters(list, filters) {
     const allowed = f.source.split('|');
     out = out.filter((e) => allowed.includes(e.source));
   }
+  if (f.breakMin !== '' && f.breakMin != null) out = out.filter((e) => String(entryBreak(e)) === String(f.breakMin));
   if (f.text) out = out.filter((e) => matchesTextFilter(e.note, f.text));
   return out;
 }
@@ -443,7 +453,7 @@ export function filterEntries(opts) {
 }
 
 function hasActiveFilters(f) {
-  return !!(f && (f.year || f.month || f.fromDate || f.toDate || f.source || f.text));
+  return !!(f && (f.year || f.month || f.fromDate || f.toDate || f.source || f.text || (f.breakMin !== '' && f.breakMin != null)));
 }
 
 function describeFilters(filters, isAdminView, scopeName) {
@@ -456,6 +466,7 @@ function describeFilters(filters, isAdminView, scopeName) {
     parts.push(`${f.fromDate ? formatDateHu(f.fromDate) : '…'} – ${f.toDate ? formatDateHu(f.toDate) : '…'}`);
   }
   if (f.source) parts.push(`forrás: ${sourceLabel(f.source.split('|')[0])}`);
+  if (f.breakMin !== '' && f.breakMin != null) parts.push(f.breakMin === '0' ? 'levonás: nincs' : `levonás: ${f.breakMin} perc`);
   if (f.text) parts.push(`keresés: „${f.text}”`);
   return parts.length ? parts.join(', ') : 'összes bejegyzés';
 }
@@ -475,14 +486,15 @@ export function renderEntries(container, opts) {
   const currentYear = String(new Date().getFullYear());
   if (!years.includes(currentYear)) years.unshift(currentYear);
   const sourceOptions = buildSourceFilterOptions(scoped);
+  const breakValues = [...new Set(scoped.map((e) => entryBreak(e)))].sort((a, b) => a - b);
 
   const list = applyEntryFilters(scoped, filters).sort(byNewest);
   const visibleIds = list.map((e) => e.id);
   const selectedVisibleCount = visibleIds.filter((id) => selectedIds.has(id)).length;
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
 
-  const totalMinutes = list.reduce((s, e) => s + (durationMinutes(e) || 0), 0);
-  const workDays = new Set(list.filter((e) => durationMinutes(e) != null).map((e) => e.date)).size;
+  const totalMinutes = list.reduce((s, e) => s + (workedMinutes(e) || 0), 0);
+  const workDays = new Set(list.filter((e) => workedMinutes(e) != null).map((e) => e.date)).size;
 
   const printName = isAdminView
     ? (selectedUserId && userById[selectedUserId] ? userById[selectedUserId].name : 'Összes felhasználó')
@@ -528,6 +540,10 @@ export function renderEntries(container, opts) {
         <option value="">Összes forrás</option>
         ${sourceOptions.map((o) => `<option value="${esc(o.value)}" ${o.value === filters.source ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select></div>
+      <div class="field mb-0"><select id="filter-break" aria-label="Levonás szűrése">
+        <option value="">Összes levonás</option>
+        ${breakValues.map((v) => `<option value="${v}" ${String(v) === String(filters.breakMin) ? 'selected' : ''}>${v === 0 ? 'Nincs levonás' : `${v} perc levonás`}</option>`).join('')}
+      </select></div>
       <div class="field mb-0">${dateFieldHtml({ name: 'filter-from', value: filters.fromDate, placeholder: 'Dátumtól', ariaLabel: 'Dátumtól' })}</div>
       <div class="field mb-0">${dateFieldHtml({ name: 'filter-to', value: filters.toDate, placeholder: 'Dátumig', ariaLabel: 'Dátumig' })}</div>
       <div class="field mb-0"><input type="text" id="filter-text" value="${esc(filters.text)}" placeholder="Megjegyzés keresése… (pl. proj*terv)" aria-label="Megjegyzés szűrése" style="min-width:220px;"></div>
@@ -560,7 +576,8 @@ export function renderEntries(container, opts) {
             ${isAdminView ? '<div class="ledger-user">Felhasználó</div>' : ''}
             <div class="ledger-date">Dátum</div>
             <div class="ledger-time">Kezdés–Vége</div>
-            <div class="ledger-duration">Időtartam</div>
+            <div class="ledger-break">Levonás</div>
+            <div class="ledger-duration">Ledolgozott</div>
             <div class="ledger-source">Forrás</div>
             <div class="ledger-note">Megjegyzés</div>
             <div class="ledger-actions"></div>
@@ -571,7 +588,8 @@ export function renderEntries(container, opts) {
               ${isAdminView ? `<div class="ledger-user">${esc(userById[e.userId] ? userById[e.userId].name : '—')}</div>` : ''}
               <div class="ledger-date">${esc(formatDateHu(e.date))}</div>
               <div class="ledger-time mono">${esc(e.startTime)}<span class="sep">–</span>${esc(e.endTime || '…')}</div>
-              <div class="ledger-duration mono">${esc(formatDuration(durationMinutes(e)))}</div>
+              ${breakCellHtml(e)}
+              <div class="ledger-duration mono">${esc(formatDuration(workedMinutes(e)))}</div>
               <div class="ledger-source"><span class="source-tag">${esc(sourceLabel(e.source))}</span></div>
               <div class="ledger-note">${esc(e.note || '')}</div>
               <div class="ledger-actions">
@@ -586,7 +604,7 @@ export function renderEntries(container, opts) {
       <thead>
         <tr>
           ${isAdminView ? '<th>Felhasználó</th>' : ''}
-          <th>Dátum</th><th>Kezdés</th><th>Vége</th><th>Időtartam</th><th>Forrás</th><th>Megjegyzés</th>
+          <th>Dátum</th><th>Kezdés</th><th>Vége</th><th>Levonás</th><th>Ledolgozott</th><th>Forrás</th><th>Megjegyzés</th>
         </tr>
       </thead>
       <tbody>
@@ -596,14 +614,15 @@ export function renderEntries(container, opts) {
           <td class="nowrap">${esc(formatDateHu(e.date, { withWeekday: true }))}</td>
           <td class="nowrap mono">${esc(e.startTime)}</td>
           <td class="nowrap mono">${esc(e.endTime || '')}</td>
-          <td class="nowrap mono">${esc(formatDuration(durationMinutes(e)))}</td>
+          <td class="nowrap mono">${entryBreak(e) ? `${entryBreak(e)} perc` : '—'}${e.breakManual ? '*' : ''}</td>
+          <td class="nowrap mono">${esc(formatDuration(workedMinutes(e)))}</td>
           <td class="nowrap">${esc(sourceLabel(e.source))}</td>
           <td>${esc(e.note || '')}</td>
         </tr>`).join('')}
       </tbody>
       <tfoot>
         <tr>
-          <td colspan="${isAdminView ? 7 : 6}">Összesen: ${esc(formatDuration(totalMinutes))} · ${workDays} munkanap · ${list.length} bejegyzés</td>
+          <td colspan="${isAdminView ? 8 : 7}">Összesen: ${esc(formatDuration(totalMinutes))} · ${workDays} munkanap · ${list.length} bejegyzés · * = kézzel beállított levonás</td>
         </tr>
       </tfoot>
     </table>`}
@@ -618,6 +637,7 @@ export function renderEntries(container, opts) {
   on('#filter-year', 'change', (ev) => opts.onFilterChange('year', ev.target.value));
   on('#filter-month', 'change', (ev) => opts.onFilterChange('month', ev.target.value));
   on('#filter-source', 'change', (ev) => opts.onFilterChange('source', ev.target.value));
+  on('#filter-break', 'change', (ev) => opts.onFilterChange('breakMin', ev.target.value));
   on('#filter-text', 'input', (ev) => opts.onFilterChange('text', ev.target.value, { debounce: true }));
   on('#btn-clear-filters', 'click', () => opts.onClearFilters());
   wireDateFields(container, {
@@ -670,6 +690,16 @@ export function renderBulkEditModal({ count, onApply }) {
         <div class="field">
           <input type="text" name="note" id="bulk-note-input" placeholder="Új megjegyzés (üresen hagyva törli a megjegyzést)" disabled>
         </div>
+        <label class="checkbox-field"><input type="checkbox" id="bulk-set-break"> Levonás módosítása:</label>
+        <div class="field">
+          <select id="bulk-break-mode" disabled>
+            <option value="rules">A felhasználó beállított szabályai szerint (újraszámolás)</option>
+            <option value="custom">Egyedi érték (perc):</option>
+          </select>
+        </div>
+        <div class="field" id="bulk-break-custom-wrap" hidden>
+          <input type="number" id="bulk-break-input" min="0" max="600" step="1" inputmode="numeric" placeholder="perc, pl. 30">
+        </div>
         <div class="form-error" hidden></div>
         <div class="form-actions">
           <button type="button" class="btn" data-close>Mégse</button>
@@ -684,24 +714,47 @@ export function renderBulkEditModal({ count, onApply }) {
   const noteInput = overlay.querySelector('#bulk-note-input');
   setSource.addEventListener('change', () => { sourceSelect.disabled = !setSource.checked; });
   setNote.addEventListener('change', () => { noteInput.disabled = !setNote.checked; });
+  const setBreak = overlay.querySelector('#bulk-set-break');
+  const breakMode = overlay.querySelector('#bulk-break-mode');
+  const breakCustomWrap = overlay.querySelector('#bulk-break-custom-wrap');
+  const breakInput = overlay.querySelector('#bulk-break-input');
+  function syncBreakUi() {
+    breakMode.disabled = !setBreak.checked;
+    breakCustomWrap.hidden = !(setBreak.checked && breakMode.value === 'custom');
+  }
+  setBreak.addEventListener('change', syncBreakUi);
+  breakMode.addEventListener('change', syncBreakUi);
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    if (!setSource.checked && !setNote.checked) {
-      return showFormError(form, 'Válassz legalább egy módosítandó mezőt (Forrás vagy Megjegyzés).');
+    if (!setSource.checked && !setNote.checked && !setBreak.checked) {
+      return showFormError(form, 'Válassz legalább egy módosítandó mezőt (Forrás, Megjegyzés vagy Levonás).');
     }
     const changes = {};
     if (setSource.checked) changes.source = sourceSelect.value;
     if (setNote.checked) changes.note = noteInput.value;
+    if (setBreak.checked) {
+      changes.breakMode = breakMode.value; // 'rules' | 'custom'
+      if (breakMode.value === 'custom') {
+        const raw = breakInput.value.trim();
+        if (!/^\d+$/.test(raw) || Number(raw) > 600) {
+          return showFormError(form, 'A levonandó szünet 0 és 600 perc közötti egész szám legyen.');
+        }
+        changes.breakMinutes = Number(raw);
+      }
+    }
     close();
     onApply(changes);
   });
 }
 
 /** Bejegyzés felvétele / szerkesztése modális ablakban. */
-export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave, onDelete }) {
+export function renderEntryModal({ entry, users, isAdmin, defaultUserId, resolveBreak, onSave, onDelete }) {
   const isNew = !entry;
   const e = entry || { date: todayDateStr(), startTime: '', endTime: '', note: '', userId: defaultUserId };
+  const initialBreak = entry
+    ? entryBreak(entry)
+    : (typeof resolveBreak === 'function' ? resolveBreak(e.userId || defaultUserId, e.date) : 0);
 
   const { overlay, close } = openModal({
     title: isNew ? 'Új bejegyzés' : 'Bejegyzés szerkesztése',
@@ -718,6 +771,12 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
           <div class="field"><label>Kezdés (24 órás)</label>${timeFieldHtml({ name: 'startTime', value: e.startTime || '', ariaLabel: 'Kezdés' })}</div>
           <div class="field"><label>Vége (üresen hagyható, ha még tart)</label>${timeFieldHtml({ name: 'endTime', value: e.endTime || '', ariaLabel: 'Befejezés' })}</div>
         </div>
+        <div class="field">
+          <label>Levonandó munkaközi szünet (perc)</label>
+          <input type="number" name="breakMinutes" id="entry-break-input" min="0" max="600" step="1" inputmode="numeric" value="${initialBreak}">
+          <div class="field-hint">Új bejegyzésnél a felhasználó beállított szabálya szerint töltődik ki (a dátum alapján); itt felülírható.</div>
+        </div>
+        <div class="worked-preview" id="entry-worked-preview"></div>
         <div class="field"><label>Megjegyzés</label><textarea name="note">${esc(e.note || '')}</textarea></div>
         <div class="form-error" hidden></div>
         <div class="form-actions">
@@ -728,19 +787,52 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
       </form>`,
   });
 
-  wireDateFields(overlay);
-  wireTimeFields(overlay);
   const form = overlay.querySelector('#entry-form');
+  const breakInput = overlay.querySelector('#entry-break-input');
+  const preview = overlay.querySelector('#entry-worked-preview');
+  const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  // Kézzel beállított levonásnál a dátum/felhasználó váltása nem írja felül az értéket.
+  let breakTouched = !!(entry && entry.breakManual);
+  breakInput.addEventListener('input', () => { breakTouched = true; updatePreview(); });
+
+  function field(name) { const el = form.querySelector(`[name="${name}"]`); return el ? el.value : ''; }
+
+  function updatePreview() {
+    const start = field('startTime');
+    const end = field('endTime');
+    const brk = Number(breakInput.value) > 0 ? Math.round(Number(breakInput.value)) : 0;
+    if (TIME_RE.test(start) && TIME_RE.test(end) && start !== end) {
+      const worked = workedMinutes({ startTime: start, endTime: end, breakMinutes: brk });
+      preview.textContent = `Ledolgozott idő: ${formatDuration(worked)}${brk ? ` (levonás: ${brk} perc)` : ''}`;
+    } else {
+      preview.textContent = '';
+    }
+  }
+
+  function refreshBreakDefault() {
+    if (!breakTouched && typeof resolveBreak === 'function' && field('date')) {
+      breakInput.value = String(resolveBreak(field('userId'), field('date')));
+    }
+    updatePreview();
+  }
+
+  wireDateFields(overlay, { date: refreshBreakDefault });
+  wireTimeFields(overlay, { startTime: updatePreview, endTime: updatePreview });
+  const userSelect = form.querySelector('select[name="userId"]');
+  if (userSelect) userSelect.addEventListener('change', refreshBreakDefault);
+  updatePreview();
+
   const del = overlay.querySelector('#btn-delete-in-modal');
   if (del) del.addEventListener('click', () => { close(); onDelete(entry.id); });
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
-    const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date || '')) return showFormError(form, 'Válassz dátumot.');
     if (!TIME_RE.test(data.startTime || '')) return showFormError(form, 'Add meg a kezdés időpontját (óra és perc).');
     if (data.endTime && !TIME_RE.test(data.endTime)) return showFormError(form, 'A befejezés időpontját óra és perc megadásával add meg, vagy hagyd üresen.');
+    const brkRaw = String(data.breakMinutes == null ? '' : data.breakMinutes).trim();
+    if (!/^\d+$/.test(brkRaw) || Number(brkRaw) > 600) return showFormError(form, 'A levonandó szünet 0 és 600 perc közötti egész szám legyen.');
     if (data.endTime) {
       if (data.endTime === data.startTime) return showFormError(form, 'A kezdés és a befejezés időpontja nem lehet azonos.');
       if (data.endTime < data.startTime &&
@@ -749,12 +841,15 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, onSave,
       }
     }
     close();
-    onSave({ id: entry ? entry.id : null, userId: data.userId, date: data.date, startTime: data.startTime, endTime: data.endTime || null, note: data.note || '' });
+    onSave({
+      id: entry ? entry.id : null, userId: data.userId, date: data.date, startTime: data.startTime,
+      endTime: data.endTime || null, breakMinutes: Number(brkRaw), note: data.note || '',
+    });
   });
 }
 
 /** Véletlen időpont-generátor dialógus. */
-export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGenerate }) {
+export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, breakRulesByUser, onGenerate }) {
   const today = todayDateStr();
   const { overlay, close } = openModal({
     title: 'Véletlen időpont-generátor',
@@ -762,6 +857,8 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
       <p class="text-muted text-sm">A kezdés a megadott tartományban egyenletesen véletlenszerű; a napi munkaidő
         hossza a minimum-maximum sávon belül <strong>Gauss-eloszlású</strong> (a sáv közepe a leggyakoribb, a
         szélsőértékek felé egyre ritkább). A létrehozott bejegyzések a Forrás oszlopban "Kézi"-ként jelennek meg.</p>
+      <p class="text-muted text-sm">A min./max. munkaidő a <strong>valós, levonás utáni</strong> ledolgozott időre
+        vonatkozik; a levonandó munkaközi szünetet a rendszer a záró időponthoz adja hozzá (napról napra az érvényes szabály szerint).</p>
       <form id="random-form" novalidate>
         ${isAdmin
           ? `<div class="field"><label>Felhasználó</label>
@@ -770,6 +867,7 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
               </select></div>`
           : `<input type="hidden" name="userId" value="${esc(defaultUserId)}">`}
 
+        <div class="break-summary" id="gen-break-summary"></div>
         <div class="field-row">
           <div class="field"><label>Ettől a naptól</label>${dateFieldHtml({ name: 'fromDate', value: today, ariaLabel: 'Ettől a naptól' })}</div>
           <div class="field"><label>Eddig a napig</label>${dateFieldHtml({ name: 'toDate', value: today, ariaLabel: 'Eddig a napig' })}</div>
@@ -779,8 +877,8 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
           <div class="field"><label>Kezdés – ig</label>${timeFieldHtml({ name: 'startTo', value: '09:00', ariaLabel: 'Kezdés ig' })}</div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Napi min. munkaidő (óra)</label><input type="number" name="minDurationHours" min="0" max="24" step="0.25" value="7" required></div>
-          <div class="field"><label>Napi max. munkaidő (óra)</label><input type="number" name="maxDurationHours" min="0" max="24" step="0.25" value="9" required></div>
+          <div class="field"><label>Napi min. valós munkaidő (óra)</label><input type="number" name="minDurationHours" min="0" max="24" step="0.25" value="7" required></div>
+          <div class="field"><label>Napi max. valós munkaidő (óra)</label><input type="number" name="maxDurationHours" min="0" max="24" step="0.25" value="9" required></div>
         </div>
 
         <label class="checkbox-field"><input type="checkbox" name="skipWeekends" checked> Hétvégék kihagyása</label>
@@ -815,6 +913,17 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
   wireDateFields(overlay);
   wireTimeFields(overlay);
   const form = overlay.querySelector('#random-form');
+  const summaryEl = overlay.querySelector('#gen-break-summary');
+  function updateBreakSummary() {
+    const uid = form.querySelector('[name="userId"]').value;
+    const lines = describeBreakRules((breakRulesByUser || {})[uid] || []);
+    summaryEl.innerHTML = lines.length
+      ? `<strong>Levonandó szünet</strong> (a felhasználó beállításai szerint):<br>${lines.map(esc).join('<br>')}`
+      : '<strong>Levonandó szünet:</strong> nincs beállítva (0 perc).';
+  }
+  const genUserSel = form.querySelector('select[name="userId"]');
+  if (genUserSel) genUserSel.addEventListener('change', updateBreakSummary);
+  updateBreakSummary();
   const quotaSelect = overlay.querySelector('#quota-period-select');
   const quotaFields = overlay.querySelector('#quota-fields');
   const quotaTargetInput = form.querySelector('[name="quotaTargetHours"]');
@@ -856,7 +965,7 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, onGe
 // ADMIN – FELHASZNÁLÓK
 // ---------------------------------------------------------------------------
 
-export function renderAdminUsers(container, { users, currentUserId, onAdd, onEdit, onToggleActive }) {
+export function renderAdminUsers(container, { users, currentUserId, onAdd, onEdit, onToggleActive, onEditBreaks }) {
   const list = users.filter((u) => !u.deleted);
   container.innerHTML = `
     <div class="page-header">
@@ -871,6 +980,7 @@ export function renderAdminUsers(container, { users, currentUserId, onAdd, onEdi
         <div class="col-email">E-mail</div>
         <div class="col-role">Szerepkör</div>
         <div class="col-state">Állapot</div>
+        <div class="col-break">Szünet (ma)</div>
         <div class="ledger-actions"></div>
       </div>
       ${list.map((u) => `
@@ -879,7 +989,9 @@ export function renderAdminUsers(container, { users, currentUserId, onAdd, onEdi
           <div class="col-email text-muted text-sm">${esc(u.email)}</div>
           <div class="col-role">${u.role === 'admin' ? '<span class="role-tag">admin</span>' : 'felhasználó'}</div>
           <div class="col-state">${u.active ? '<span class="badge badge-ok"><span class="badge-dot"></span>aktív</span>' : '<span class="badge badge-neutral">inaktív</span>'}</div>
+          <div class="col-break text-muted text-sm">${(() => { const b = resolveBreakMinutes(u.breakRules, todayDateStr()); return b ? `${b} perc` : '—'; })()}</div>
           <div class="ledger-actions">
+            <button class="icon-btn" data-break-user="${esc(u.id)}" title="Szünet-levonás" aria-label="Szünet-levonás">${icon('clock')}</button>
             <button class="icon-btn" data-edit-user="${esc(u.id)}" title="Szerkesztés" aria-label="Szerkesztés">${icon('edit')}</button>
             <button class="icon-btn" data-toggle-user="${esc(u.id)}" title="${u.active ? 'Inaktiválás' : 'Aktiválás'}" aria-label="${u.active ? 'Inaktiválás' : 'Aktiválás'}">${icon(u.active ? 'pause' : 'play')}</button>
           </div>
@@ -892,6 +1004,87 @@ export function renderAdminUsers(container, { users, currentUserId, onAdd, onEdi
   container.querySelectorAll('[data-toggle-user]').forEach((b) =>
     b.addEventListener('click', () => onToggleActive(b.dataset.toggleUser))
   );
+  container.querySelectorAll('[data-break-user]').forEach((b) =>
+    b.addEventListener('click', () => onEditBreaks(list.find((u) => u.id === b.dataset.breakUser)))
+  );
+}
+
+/** Egy felhasználó szünet-levonási szabályainak szerkesztője (több dátumtartomány is lehet). */
+export function renderBreakRulesModal({ user, onSave }) {
+  let rows = (user.breakRules || []).map((r) => ({ ...r }));
+  const { overlay, close } = openModal({
+    title: `Szünet-levonás – ${user.name}`,
+    bodyHtml: `
+      <p class="text-muted text-sm">Az itt megadott percek a munkaidőből levonódnak. Több időszakot is felvehetsz
+        (pl. szerződésmódosításkor): az üres „Ettől” = kezdettől, az üres „Eddig” = nincs vége.
+        Átfedő időszakoknál a <strong>később kezdődő</strong> szabály érvényes. Ahol egy szabály sem illik a napra, a levonás 0 perc.</p>
+      <form id="break-form" novalidate>
+        <div id="break-rows"></div>
+        <button type="button" class="btn btn-sm" id="btn-add-break-row">+ Új időszak</button>
+        <hr class="divider">
+        <label class="checkbox-field"><input type="checkbox" name="applyExisting" checked>
+          A meglévő bejegyzések levonását is frissítsd az új szabályok szerint (a kézzel módosított levonású bejegyzéseket nem érinti)</label>
+        <div class="form-error" hidden></div>
+        <div class="form-actions">
+          <button type="button" class="btn" data-close>Mégse</button>
+          <button type="submit" class="btn btn-primary">Mentés</button>
+        </div>
+      </form>`,
+  });
+  const form = overlay.querySelector('#break-form');
+  const rowsEl = overlay.querySelector('#break-rows');
+
+  function collectRows() {
+    return [...rowsEl.querySelectorAll('.break-row')].map((row) => {
+      const hiddens = row.querySelectorAll('input[type="hidden"]');
+      const texts = row.querySelectorAll('.date-field-input');
+      return {
+        id: row.dataset.id || '',
+        from: hiddens[0].value,
+        to: hiddens[1].value,
+        fromInvalid: texts[0].value.trim() !== '' && hiddens[0].value === '',
+        toInvalid: texts[1].value.trim() !== '' && hiddens[1].value === '',
+        minutes: row.querySelector('.break-minutes').value,
+      };
+    });
+  }
+
+  function renderRows() {
+    rowsEl.innerHTML = rows.length === 0
+      ? '<p class="text-muted text-sm">Nincs beállított levonás – minden napon 0 perc.</p>'
+      : rows.map((r, i) => `
+        <div class="break-row" data-id="${esc(r.id || '')}">
+          <div class="field"><label>Ettől</label>${dateFieldHtml({ name: `from-${i}`, value: r.from || '', placeholder: 'kezdettől', ariaLabel: 'Ettől' })}</div>
+          <div class="field"><label>Eddig</label>${dateFieldHtml({ name: `to-${i}`, value: r.to || '', placeholder: 'nincs vége', ariaLabel: 'Eddig' })}</div>
+          <div class="field break-min"><label>Levonás (perc)</label>
+            <input type="number" class="break-minutes" min="0" max="600" step="1" inputmode="numeric" value="${r.minutes == null ? '' : esc(String(r.minutes))}"></div>
+          <button type="button" class="icon-btn" data-del-row="${i}" title="Időszak törlése" aria-label="Időszak törlése">${icon('trash')}</button>
+        </div>`).join('');
+    wireDateFields(rowsEl);
+    rowsEl.querySelectorAll('[data-del-row]').forEach((b) =>
+      b.addEventListener('click', () => {
+        rows = collectRows();
+        rows.splice(Number(b.dataset.delRow), 1);
+        renderRows();
+      })
+    );
+  }
+
+  overlay.querySelector('#btn-add-break-row').addEventListener('click', () => {
+    rows = collectRows();
+    rows.push({ id: '', from: '', to: '', minutes: '' });
+    renderRows();
+  });
+  renderRows();
+
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const result = validateBreakRules(collectRows());
+    if (result.error) return showFormError(form, result.error);
+    const applyExisting = form.querySelector('[name="applyExisting"]').checked;
+    close();
+    onSave(result.rules, applyExisting);
+  });
 }
 
 export function renderUserModal({ user, onSave }) {
@@ -979,6 +1172,19 @@ export function renderSettings(container, o) {
       </p>
     </div>
 
+    <div class="card">
+      <h2>Szünet-levonás</h2>
+      <p class="text-muted text-sm">A munkaidőből levonandó munkaközi szünet a saját bejegyzéseidhez, dátumtartományonként.
+        Új bejegyzéseknél (és a véletlen generátornál) ez érvényesül.</p>
+      ${(() => {
+        const lines = describeBreakRules(o.breakRules);
+        return lines.length
+          ? `<ul class="break-list">${lines.map((l) => `<li class="mono">${esc(l)}</li>`).join('')}</ul>`
+          : '<p class="text-sm">Nincs beállított levonás (0 perc).</p>';
+      })()}
+      <button class="btn btn-sm" id="btn-edit-breaks">Szerkesztés</button>
+    </div>
+
     ${o.isStandalone ? '' : `
     <div class="card">
       <h2>Alkalmazás telepítése</h2>
@@ -1016,6 +1222,7 @@ export function renderSettings(container, o) {
   on('#btn-sync-now', o.onSyncNow);
   on('#btn-logout', o.onLogout);
   on('#btn-install', o.onInstall);
+  on('#btn-edit-breaks', o.onEditBreaks);
   on('#btn-copy-cmd', () => o.onCopy(o.autostartCommand));
   on('#btn-backup', o.onBackup);
   on('#btn-reset-local', o.onResetLocal);
