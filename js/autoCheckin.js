@@ -36,7 +36,7 @@ export function detectLaunchContext() {
  * Ha indokolt, létrehoz egy automatikus bejegyzést a mai napra ezen az eszközön.
  * @returns {Promise<object|null>} az újonnan létrehozott bejegyzés, vagy null, ha nem kellett.
  */
-export async function maybeAutoCheckin({ userId, deviceId, deviceName, breakMinutes = 0 }) {
+export async function maybeAutoCheckin({ userId, deviceId, deviceName, breakMinutes = 0, isWorkingToday }) {
   const enabled = await DB.getMeta('autoCheckinEnabled', true);
   if (enabled === false) return null;
 
@@ -45,6 +45,10 @@ export async function maybeAutoCheckin({ userId, deviceId, deviceName, breakMinu
   // Asztali gépen: KIZÁRÓLAG a bejelentkezéskor indított (autostart) indítás számít.
   // Telefonon: minden appnyitás számít, hiszen ott ez maga a "belépés az appba".
   if (!isAutostart && !isMobile) return null;
+
+  // Csak a magyar munkanaptár szerinti munkanapon (hétköznap, vagy áthelyezett munkanap-szombaton)
+  // indul automatikus bejegyzés; hétvégén, ünnepnapon és áthelyezett pihenőnapon nem.
+  if (isWorkingToday === false) return null;
 
   const today = todayDateStr();
 

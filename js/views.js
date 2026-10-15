@@ -17,6 +17,7 @@ import {
 } from './models.js';
 import { dateFieldHtml, wireDateFields, closeAnyOpenCalendar } from './datePicker.js';
 import { timeFieldHtml, wireTimeFields } from './timeField.js';
+import { describeDay } from './workCalendar.js';
 
 const HU_MONTHS_SHORT = [
   'január', 'február', 'március', 'április', 'május', 'június',
@@ -315,7 +316,7 @@ function minutesSince(timeStr) {
   return Math.max(0, d.getHours() * 60 + d.getMinutes() - (h * 60 + m));
 }
 
-export function renderDashboard(container, { user, entries, syncState, onCheckIn, onCheckOut, onEditEntry, onSyncNow, onGoEntries, showSync }) {
+export function renderDashboard(container, { user, entries, syncState, onCheckIn, onCheckOut, onEditEntry, onSyncNow, onGoEntries, showSync, todayInfo }) {
   const mine = entries.filter((e) => !e.deleted && e.userId === user.id);
   const today = todayDateStr();
   const openToday = mine.find((e) => !e.endTime && e.date === today);
@@ -377,6 +378,16 @@ export function renderDashboard(container, { user, entries, syncState, onCheckIn
         </div>
       </div>
     </div>
+
+    ${(() => {
+      if (!todayInfo || todayInfo.kind === 'workday') return '';
+      const desc = describeDay(todayInfo);
+      let text;
+      if (todayInfo.kind === 'transferred_workday') text = `Ma áthelyezett munkanap (${desc}).`;
+      else if (!openToday) text = `Ma nem munkanap (${desc}), ezért nem indult automatikus bejegyzés. Kézzel továbbra is rögzíthetsz.`;
+      else text = `Ma nem munkanap (${desc}).`;
+      return `<p class="day-note">${esc(text)}</p>`;
+    })()}
 
     <div class="stat-row">
       <div class="stat-box"><div class="stat-value mono">${esc(formatDuration(todayMinutes))}</div><div class="stat-label">Ma eddig</div></div>
@@ -849,7 +860,7 @@ export function renderEntryModal({ entry, users, isAdmin, defaultUserId, resolve
 }
 
 /** Véletlen időpont-generátor dialógus. */
-export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, breakRulesByUser, onGenerate }) {
+export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, breakRulesByUser, calendarUncovered, onGenerate }) {
   const today = todayDateStr();
   const { overlay, close } = openModal({
     title: 'Véletlen időpont-generátor',
@@ -881,8 +892,11 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, brea
           <div class="field"><label>Napi max. valós munkaidő (óra)</label><input type="number" name="maxDurationHours" min="0" max="24" step="0.25" value="9" required></div>
         </div>
 
-        <label class="checkbox-field"><input type="checkbox" name="skipWeekends" checked> Hétvégék kihagyása</label>
         <label class="checkbox-field"><input type="checkbox" name="skipHolidays" checked> Magyar munkaszüneti napok kihagyása</label>
+        <div class="field-hint" style="margin:-8px 0 10px 26px;">A magyar munkanaptár szerint: a hétvégék, az ünnepnapok és az áthelyezett
+          pihenőnapok kimaradnak, az áthelyezett munkanapokra (pl. munkanappá tett szombat) viszont készül bejegyzés.
+          Kikapcsolva minden napra generál.</div>
+        <div class="notice notice-err" id="gen-calendar-notice" hidden></div>
         <label class="checkbox-field"><input type="checkbox" name="overwrite"> Meglévő bejegyzések felülírása</label>
 
         <hr class="divider">
@@ -910,9 +924,24 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, brea
       </form>`,
   });
 
-  wireDateFields(overlay);
+  wireDateFields(overlay, { fromDate: () => updateCalendarNotice(), toDate: () => updateCalendarNotice() });
   wireTimeFields(overlay);
   const form = overlay.querySelector('#random-form');
+  const calendarNoticeEl = overlay.querySelector('#gen-calendar-notice');
+  // Ha a tartományban van a munkanaptár által le nem fedett nap (pl. 2027, amíg nincs a fájlban),
+  // szólunk, hogy ott csak a hétvége/ünnepnap-szabály működik.
+  function updateCalendarNotice() {
+    const from = form.querySelector('[name="fromDate"]').value;
+    const to = form.querySelector('[name="toDate"]').value;
+    const skip = form.querySelector('[name="skipHolidays"]').checked;
+    const years = skip && from && to && from <= to && typeof calendarUncovered === 'function' ? calendarUncovered(from, to) : [];
+    calendarNoticeEl.hidden = years.length === 0;
+    if (years.length) {
+      calendarNoticeEl.textContent = `A munkanaptár nem tartalmaz adatot erre: ${years.join(', ')}. Ezekre a napokra csak a hétvégék és a képlettel számolt ünnepnapok maradnak ki; az áthelyezett munkanapokat/pihenőnapokat a program nem ismeri.`;
+    }
+  }
+  form.querySelector('[name="skipHolidays"]').addEventListener('change', updateCalendarNotice);
+  updateCalendarNotice();
   const summaryEl = overlay.querySelector('#gen-break-summary');
   function updateBreakSummary() {
     const uid = form.querySelector('[name="userId"]').value;
@@ -937,7 +966,6 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, brea
     ev.preventDefault();
     const fd = new FormData(form);
     const d = Object.fromEntries(fd.entries());
-    d.skipWeekends = fd.has('skipWeekends');
     d.skipHolidays = fd.has('skipHolidays');
     d.overwrite = fd.has('overwrite');
     d.minDurationHours = Number(d.minDurationHours);
@@ -1173,6 +1201,24 @@ export function renderSettings(container, o) {
     </div>
 
     <div class="card">
+      <h2>Munkanaptár</h2>
+      ${(() => {
+        const c = o.workCalendar || {};
+        if (!c.loaded) {
+          return `<p class="text-sm" style="color:var(--err-600);">A munkanaptár nem töltődött be${c.loadError ? ` (${esc(c.loadError)})` : ''}.
+            A program ilyenkor a hétvégék és a képlettel számolt ünnepnapok alapján dolgozik.</p>`;
+        }
+        return `<p class="text-sm">Lefedett időszak: <span class="mono">${esc(formatDateHu(c.startDate))} – ${esc(formatDateHu(c.endDate))}</span>
+          ${c.generatedAt ? `<br>Összeállítva: <span class="mono">${esc(formatDateHu(c.generatedAt))}</span>` : ''}</p>`;
+      })()}
+      ${o.isAdmin && o.workCalendar && o.workCalendar.missingYear
+        ? `<div class="notice notice-err">Frissítés szükséges: a munkanaptár nem tartalmaz adatot a(z) <strong>${o.workCalendar.missingYear}.</strong> évre.
+           Amíg nincs benne, az áthelyezett munkanapokat és pihenőnapokat a program nem ismeri.</div>` : ''}
+      <p class="text-muted text-sm">A magyar munkarend (munkaszüneti napok, áthelyezett munkanapok és pihenőnapok) a
+        <code>data/hu_munkarend_naptar.json</code> fájlból töltődik be. Ezt évente kézzel kell kiegészíteni (lásd README).</p>
+    </div>
+
+    <div class="card">
       <h2>Szünet-levonás</h2>
       <p class="text-muted text-sm">A munkaidőből levonandó munkaközi szünet a saját bejegyzéseidhez, dátumtartományonként.
         Új bejegyzéseknél (és a véletlen generátornál) ez érvényesül.</p>
@@ -1229,4 +1275,23 @@ export function renderSettings(container, o) {
   on('#btn-save-device-name', () => o.onSaveDeviceName(container.querySelector('#device-name-input').value.trim()));
   const tgl = container.querySelector('#auto-checkin-toggle');
   if (tgl) tgl.addEventListener('change', (ev) => o.onToggleAutoCheckin(ev.target.checked));
+}
+
+/** Munkanaptár-frissítési emlékeztető (csak adminnak, legfeljebb hetente egyszer jelenik meg). */
+export function renderCalendarReminderModal({ requiredYear, startDate, endDate }) {
+  openModal({
+    title: 'Munkanaptár frissítése szükséges',
+    bodyHtml: `
+      <p class="text-sm">A munkanaptár fájl (<code>data/hu_munkarend_naptar.json</code>) jelenleg a
+        <strong>${esc(formatDateHu(startDate))} – ${esc(formatDateHu(endDate))}</strong> időszakot fedi le,
+        a(z) <strong>${requiredYear}. évre</strong> nincs benne adat.</p>
+      <p class="text-muted text-sm">A következő évi munkarendet (áthelyezett munkanapok és pihenőnapok) a kormányrendeletnek
+        minden év október 31-ig kell közzétennie. Egészítsd ki a fájlt az új évvel, és töltsd fel a GitHubra.</p>
+      <p class="text-muted text-sm">Amíg a frissítés nem történik meg, a véletlen generátor és az automatikus bejegyzés az
+        érintett évre csak a hétvégék és a képlettel számolt ünnepnapok alapján dönt. Ezt az emlékeztetőt csak
+        adminisztrátornak, hetente legfeljebb egyszer mutatjuk, amíg a hiány fennáll.</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" data-close>Rendben</button>
+      </div>`,
+  });
 }

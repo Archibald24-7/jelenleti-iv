@@ -25,8 +25,9 @@
 // ============================================================================
 
 import {
-  addDays, isWeekend, isHungarianHoliday, getWeekStart, createEntry, durationMinutes, resolveBreakMinutes,
+  addDays, getWeekStart, createEntry, durationMinutes, resolveBreakMinutes,
 } from './models.js';
+import { isWorkingDay as calendarIsWorkingDay } from './workCalendar.js';
 
 function timeToMinutes(t) {
   const [h, m] = t.split(':').map(Number);
@@ -85,7 +86,7 @@ function makeEntry(cfg, date, workedMins) {
     source: 'random',
     deviceId: cfg.deviceId || '',
     deviceName: cfg.deviceName || '',
-    note: '',//'Automatikusan generált időpont',
+    note: 'Automatikusan generált időpont',
   });
 }
 
@@ -102,8 +103,11 @@ function makeEntry(cfg, date, workedMins) {
  * @param {number} cfg.maxDurationHours - napi maximum VALÓS (levonás utáni) munkaidő (óra, lehet tizedes)
  * @param {Array} [cfg.breakRules] - a felhasználó levonási szabályai ({from,to,minutes}); a generátor
  *   napról napra az érvényes szabály szerinti szünetet adja a záró időponthoz
- * @param {boolean} [cfg.skipWeekends]
- * @param {boolean} [cfg.skipHolidays] - magyar munkaszüneti napok kihagyása
+ * @param {boolean} [cfg.skipHolidays] - ha igaz, CSAK a magyar munkanaptár szerinti munkanapokra
+ *   (hétköznap, illetve áthelyezett munkanap-szombat) készül bejegyzés: a hétvégék, ünnepnapok és az
+ *   áthelyezett pihenőnapok kimaradnak. Ha hamis, minden napra generál.
+ * @param {function(string):boolean} [cfg.isWorkingDay] - a nap munkanap-e (alapból a betöltött
+ *   munkanaptár; ahol az nem fed le egy napot, ott hétvége + képlettel számolt ünnepnap szabály)
  * @param {'none'|'weekly'|'monthly'} [cfg.quotaPeriod] - kvóta-alapú elosztás időegysége
  * @param {number} [cfg.quotaTargetHours] - cél óraszám a kvóta-időszakra (csak ha quotaPeriod!='none')
  * @param {number} [cfg.quotaToleranceHours] - ± tűrés órában (befolyásolja a napi szórást)
@@ -125,12 +129,13 @@ export function generateForDateRange(cfg, context) {
   const existing = context.existingEntriesForUser || [];
   const existingDateSet = new Set(existing.map((e) => e.date));
 
+  const isWorkday = typeof cfg.isWorkingDay === 'function' ? cfg.isWorkingDay : (d) => calendarIsWorkingDay(d);
+
   const candidates = [];
   let cursor = cfg.fromDate;
   while (cursor <= cfg.toDate) {
     const skip =
-      (cfg.skipWeekends && isWeekend(cursor)) ||
-      (cfg.skipHolidays && isHungarianHoliday(cursor)) ||
+      (cfg.skipHolidays && !isWorkday(cursor)) ||
       (existingDateSet.has(cursor) && !context.overwrite);
     if (!skip) candidates.push(cursor);
     cursor = addDays(cursor, 1);

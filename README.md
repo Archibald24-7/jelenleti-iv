@@ -14,7 +14,7 @@ Windows/Android eszközön nem volt tesztelve. A kódot alapos automatikus teszt
 (lásd `test/` mappa a forrás-csomagban, ha kéred) és böngésző-szimulációval ellenőriztem,
 de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szívesen segítek.
 
-----
+---
 
 ## Tartalomjegyzék
 
@@ -36,9 +36,10 @@ de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szí
 - **Kézi és visszamenőleges bejegyzés** bármelyik napra.
 - **Véletlen időpont-generátor**: a kezdés a megadott tartományban egyenletesen
   véletlenszerű, a napi munkaidő hossza egy minimum-maximum sávon belül
-  **Gauss-eloszlású** (a sáv közepe a leggyakoribb érték). Kihagyhatja a hétvégéket
-  ÉS a magyar munkaszüneti napokat (Húsvéthez kötött mozgó ünnepekkel együtt,
-  automatikusan bármelyik évre). Opcionálisan **heti vagy havi célóraszám** is
+  **Gauss-eloszlású** (a sáv közepe a leggyakoribb érték). A „Magyar munkaszüneti
+  napok kihagyása” opció a **magyar munkanaptár** szerint dolgozik: csak munkanapra
+  (hétköznap, illetve áthelyezett munkanapra, pl. munkanappá tett szombatra) készít
+  bejegyzést. Opcionálisan **heti vagy havi célóraszám** is
   megadható (± tűréssel) - ilyenkor a generátor a hét/hónap hátralévő napjaira
   dinamikusan újraszámolja a szükséges napi átlagot, hogy megközelítse a célt.
 - **Részletes szűrés a bejegyzések között**: felhasználó, év, hónap, szabad
@@ -261,8 +262,10 @@ bejegyzések, admin nézetek, véletlen generátor) anélkül, hogy bármit be k
 - **Véletlen generátor**: adj meg egy dátumtartományt, egy kezdés-időtartományt
   (mikor kezdődhet a munka), és egy napi minimum/maximum munkaidő-sávot (órában).
   A generátor a sáv közepéhez közeli időtartamokat gyakrabban választja
-  (Gauss-eloszlás), a szélsőértékeket ritkábban. Kihagyhatod a hétvégéket és a
-  magyar munkaszüneti napokat. Opcionálisan heti vagy havi célóraszámot (± tűréssel)
+  (Gauss-eloszlás), a szélsőértékeket ritkábban. A „Magyar munkaszüneti napok
+  kihagyása” a munkanaptár szerint működik: a hétvégék, ünnepnapok és az áthelyezett
+  pihenőnapok kimaradnak, az áthelyezett munkanapokra (szombat) viszont készül bejegyzés;
+  kikapcsolva minden napra generál (külön „Hétvégék kihagyása” opció nincs). Opcionálisan heti vagy havi célóraszámot (± tűréssel)
   is megadhatsz - ilyenkor a napi átlagot a hét/hónap hátralévő napjaira dinamikusan
   újraszámolja, hogy megközelítse a célt (a már meglévő bejegyzések órái is
   beleszámítanak). Ez sosem lesz perc-pontos - ahogy nem is kell annak lennie.
@@ -307,6 +310,41 @@ A heti/havi célóraszám is a valós munkaidőre vonatkozik, és a meglévő be
 órái számítanak az alapba. A generátor ablaka kiírja a kiválasztott felhasználó szabályait.
 A CSV-export a bruttó időt, a levonást és a ledolgozott időt külön oszlopban adja.
 
+## Munkanaptár (áthelyezett munkanapok és pihenőnapok)
+
+**Mire használja az app?** A `data/hu_munkarend_naptar.json` fájl minden napról megmondja, hogy
+munkanap-e: hétköznapi munkanap, hétvége, munkaszüneti nap, **áthelyezett munkanap** (pl. egy szombat,
+amit ledolgozós napnak jelöltek) vagy **áthelyezett pihenőnap** (az érte kiadott szabadnap). Ezt használja:
+- a **véletlen generátor** („Magyar munkaszüneti napok kihagyása”): csak munkanapra, illetve áthelyezett
+  munkanapra generál;
+- az **automatikus bejegyzés** (telefonon az app megnyitásakor, Windowson az automatikus indításkor):
+  csak munkanapon indul. Hétvégén, ünnepnapon, áthelyezett pihenőnapon nem; az irányítópult ilyenkor
+  kiírja, miért nem indult bejegyzés (kézzel továbbra is rögzíthetsz);
+- a **naptárválasztó** jelölései (lásd lent), és az irányítópult „ma nem munkanap” megjegyzése.
+
+A `data/hu_munkarend_naptar.schema.json` a fájl szerkezetének leírása (JSON Schema) - az app futásához nem kell.
+
+**Éves frissítés (kb. november 1. után):**
+1. A következő évi munkarendet a kormányrendeletnek október 31-ig kell közzétennie (Mt. 102. § (5)).
+2. Egészítsd ki a `data/hu_munkarend_naptar.json` fájlt az új év minden napjával (a meglévő napok
+   szerkezetét másolva), a `workScheduleChanges` listával, a `years` szakasszal és a `coverage` adatokkal.
+3. Ellenőrizd a fájlt a projekt gyökeréből (Node.js 18+ kell): `node tools/validate-calendar.mjs`.
+   Megtalálja az elgépelt dátumot, a rossz hétköznapot, a hézagot és a pár nélküli áthelyezett napot.
+4. Töltsd fel a GitHubra. A service worker a `data/` mappa fájljait a háttérben frissíti, ezért a
+   `CACHE_VERSION` növelése **nem** kell hozzá; az új adat egy-két indítás alatt minden eszközre megérkezik.
+
+**Emlékeztető:** ha a fájlban nincs adat a szükséges évre, az **admin** egy figyelmeztető ablakot kap
+(**hetente legfeljebb egyszer**; az utolsó megjelenítés időpontja az admin felhasználói rekordjában
+tárolódik, így több eszközön is együtt érvényes). Szükséges év: **november 1-jétől a következő év**, azelőtt
+az idei. (Utóbbi azért kell, hogy az emlékeztető januárban se némuljon el, ha novemberben elmaradt a
+frissítés.) Az ellenőrzés a fájlban lévő napokat nézi: egy év akkor „megvan”, ha mind a 365/366 napja
+szerepel. Más felhasználónak nem jelenik meg. Az admin a Beállítások → Munkanaptár kártyán is látja a
+lefedett időszakot és a hiányzó évet (ez tartósan látszik, nem hetente egyszer).
+
+**Mi történik, ha a fájl nem tölthető be, vagy nem fed le egy napot?** Az app nem áll le: a hétvégék és a
+(képlettel kiszámolt) munkaszüneti napok alapján dönt. Az áthelyezett napokat ilyenkor nem ismeri. A
+generátor jelzi, ha a kiválasztott időszakban van le nem fedett nap.
+
 ## Dátum- és időformátum
 
 Az app mindenhol a magyar sorrendet követi: **év.hónap.nap.** (pl. `2026.09.29.`),
@@ -323,8 +361,9 @@ beállítását követi, és ezt egy weboldal nem tudja felülírni - ezért az 
 - **Dátummező**: szabadon begépelhető (csak a számjegyeket kell írni, a pontokat a
   mező magától beszúrja: `20160315` → `2016.03.15.`; a `/` jel is elfogadott
   elválasztó), VAGY a mező melletti naptár-ikonnal választható. A naptár hétfővel
-  kezdődik, a hétvégék és magyar munkaszüneti napok halvány pirossal vannak
-  jelölve. **Gyors lapozás:** a naptár fejlécére (hónap + év) kattintva hónap-,
+  kezdődik, és a magyar munkanaptárt mutatja: a nem munkanapok (hétvége, ünnepnap,
+  áthelyezett pihenőnap) halvány pirossal, az áthelyezett munkanapok (és pihenőnapok)
+  színes ponttal vannak jelölve, a nap fölé víve a leírásuk is látszik. **Gyors lapozás:** a naptár fejlécére (hónap + év) kattintva hónap-,
   még egyszer kattintva évválasztó rács nyílik (12 évenként lapozható), így pl.
   10 évvel korábbra 3-4 kattintással el lehet jutni. Nem létező dátumot (pl.
   2026.02.30.) a mező piros jelöléssel elutasít.
@@ -364,11 +403,11 @@ bejegyzéseket tartalmazza.
   tucat fő, néhány év bejegyzései) ez bőven elég gyors és egyszerű. Nagyon nagy
   csapatnál (több száz fő, napi sok száz egyidejű írás) egy valódi adatbázis-alapú
   backend jobban skálázódna.
-- **A munkaszüneti nap-lista a hivatalos, 11 napos magyar ünnepnaplistát tartalmazza**
-  (évről évre automatikusan kiszámolva, a Húsvéthoz kötött mozgó ünnepekkel együtt -
-  nem kell évente frissíteni). Amit szándékosan NEM tartalmaz: az évente egyedi
-  kormányrendelettel meghatározott "ledolgozós szombat" / "kapott pihenőnap"
-  áthelyezéseket, mert azok nem számolhatók ki előre, algoritmikusan.
+- **A munkanaptár fájl kézi frissítést igényel.** Az áthelyezett munkanapokat/pihenőnapokat
+  évente kormányrendelet határozza meg, ezek nem számolhatók ki képlettel; a fájl (a mellékelt
+  állapotban) 2005.01.01 – 2026.12.31 között teljes. Ahol a fájl nem fed le egy napot (pl. 2027,
+  amíg nincs benne), ott az app a hétvége + képlettel számolt ünnepnap szabályra esik vissza, tehát
+  az áthelyezéseket az ilyen napokra nem ismeri (lásd lent: Munkanaptár).
 - **Ezt a sandbox-környezetet nem lehetett éles Windows/Android eszközön tesztelni.**
   A kódot alapos automatikus teszteléssel (egységtesztek + böngésző-szimuláció)
   ellenőriztem, de az első éles beüzemeléskor apróbb hibák előfordulhatnak.
@@ -428,8 +467,16 @@ jelenleti-iv-kezelo/
 │   ├── sync.js                   OneDrive szinkronizáció (Microsoft Graph API)
 │   ├── randomGenerator.js        véletlen időpont-generátor
 │   ├── autoCheckin.js            automatikus bejegyzés-észlelés
+│   ├── workCalendar.js           munkanaptár betöltése/lekérdezése (áthelyezett napok)
+│   ├── datePicker.js             saját dátumválasztó widget
+│   ├── timeField.js              saját, szegmentált 24 órás időmező widget
 │   ├── views.js                  a teljes felhasználói felület
 │   └── vendor/msal-browser.min.js  Microsoft Authentication Library (MIT licenc)
+├── data/
+│   ├── hu_munkarend_naptar.json        a magyar munkanaptár (2005-től, évente frissítendő)
+│   └── hu_munkarend_naptar.schema.json a fájl szerkezetének leírása (JSON Schema)
+├── tools/
+│   └── validate-calendar.mjs     a munkanaptár-fájl ellenőrzője (évenkénti frissítéshez)
 ├── icons/                        alkalmazásikonok
 └── windows-setup/
     └── setup-autostart.ps1       Windows automatikus indítás (önálló szkript)

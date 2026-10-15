@@ -15,7 +15,8 @@
 // olvassa a FormData), a látható szövegmező csak megjelenítés/gépelés.
 // ============================================================================
 
-import { toDateStr, formatDateHu, isWeekend, isHungarianHoliday } from './models.js';
+import { toDateStr, formatDateHu } from './models.js';
+import { getDayInfo, describeDay } from './workCalendar.js';
 
 const HU_WEEKDAYS_MIN = ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V']; // hétfővel kezdve
 const HU_MONTHS = [
@@ -166,8 +167,14 @@ function openCalendar(wrapper) {
               if (d.getMonth() !== viewMonth) cls.push('dp-muted');
               if (ds === todayStr) cls.push('dp-today');
               if (ds === currentVal) cls.push('dp-selected');
-              if (isWeekend(ds) || isHungarianHoliday(ds)) cls.push('dp-weekend');
-              return `<button type="button" class="${cls.join(' ')}" data-date="${ds}">${d.getDate()}</button>`;
+              // A magyar munkanaptár szerint: piros = nem munkanap (hétvége, ünnep, áthelyezett pihenőnap);
+              // zöld pont = áthelyezett munkanap (pl. munkanappá tett szombat), piros pont = áthelyezett pihenőnap.
+              const info = getDayInfo(ds);
+              if (!info.isWorkingDay) cls.push('dp-off');
+              if (info.kind === 'transferred_workday') cls.push('dp-swap-work');
+              if (info.kind === 'transferred_rest_day') cls.push('dp-swap-rest');
+              const title = info.kind === 'workday' ? '' : ` title="${describeDay(info).replace(/"/g, '&quot;')}"`;
+              return `<button type="button" class="${cls.join(' ')}" data-date="${ds}"${title}>${d.getDate()}</button>`;
             })
             .join('')}
         </div>`;
@@ -200,6 +207,7 @@ function openCalendar(wrapper) {
         <button type="button" class="dp-nav" data-dir="1" aria-label="Következő">›</button>
       </div>
       ${bodyHtml()}
+      ${view === 'days' ? '<div class="dp-legend"><span class="dp-key dp-key-off">nem munkanap</span><span class="dp-key dp-key-work">áthelyezett munkanap</span></div>' : ''}
       <div class="dp-footer">
         <button type="button" class="dp-footer-btn" data-date="${todayStr}">Ma</button>
         <button type="button" class="dp-footer-btn dp-footer-clear">Törlés</button>
