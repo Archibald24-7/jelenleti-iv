@@ -884,7 +884,7 @@ export function renderRandomGeneratorModal({ users, isAdmin, defaultUserId, brea
           <div class="field"><label>Eddig a napig</label>${dateFieldHtml({ name: 'toDate', value: today, ariaLabel: 'Eddig a napig' })}</div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Kezdés – tól</label>${timeFieldHtml({ name: 'startFrom', value: '08:00', ariaLabel: 'Kezdés tól' })}</div>
+          <div class="field"><label>Kezdés – tól</label>${timeFieldHtml({ name: 'startFrom', value: '07:00', ariaLabel: 'Kezdés tól' })}</div>
           <div class="field"><label>Kezdés – ig</label>${timeFieldHtml({ name: 'startTo', value: '09:00', ariaLabel: 'Kezdés ig' })}</div>
         </div>
         <div class="field-row">
