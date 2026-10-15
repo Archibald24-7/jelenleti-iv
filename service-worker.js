@@ -11,7 +11,7 @@
 // WORKER SOSEM fogja el - azok mindig közvetlenül a hálózatra mennek.
 // ============================================================================
 
-const CACHE_VERSION = 7;
+const CACHE_VERSION = 8;
 const CACHE_NAME = `jelenleti-iv-v${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -29,6 +29,8 @@ const PRECACHE = [
   './js/views.js',
   './js/datePicker.js',
   './js/timeField.js',
+  './js/workCalendar.js',
+  './data/hu_munkarend_naptar.json',
   './js/vendor/msal-browser.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -114,6 +116,25 @@ self.addEventListener('fetch', (event) => {
         } catch (e) {
           return (await cache.match(req, { ignoreSearch: true })) || Response.error();
         }
+      })()
+    );
+    return;
+  }
+
+  // 2b) Munkanaptár-adatfájl (/data/): "stale-while-revalidate" - azonnal a gyorsítótárból szolgáljuk ki
+  //     (gyors indulás, offline is működik), a háttérben pedig ellenőrizzük a szerveren (cache: 'no-cache'),
+  //     és ha változott, frissítjük. Így a kézzel frissített naptárfájl verziószám-növelés nélkül,
+  //     egy-két indítás alatt megérkezik minden eszközre.
+  if (url.pathname.includes('/data/')) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(req, { ignoreSearch: true });
+        const refresh = fetch(new Request(req, { cache: 'no-cache' }))
+          .then((res) => { if (res && res.ok) cache.put(req, res.clone()); return res; })
+          .catch(() => null);
+        if (cached) { event.waitUntil(refresh); return cached; }
+        return (await refresh) || Response.error();
       })()
     );
     return;

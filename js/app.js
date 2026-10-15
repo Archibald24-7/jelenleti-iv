@@ -13,6 +13,7 @@ import * as Models from './models.js';
 import * as Auth from './auth.js';
 import * as Sync from './sync.js';
 import * as RandomGen from './randomGenerator.js';
+import * as WorkCalendar from './workCalendar.js';
 import { maybeAutoCheckin } from './autoCheckin.js';
 import * as Views from './views.js';
 
@@ -168,6 +169,7 @@ function csvEscape(v) {
 
 async function init() {
   await DB.openDB();
+  await WorkCalendar.loadWorkCalendar(); // hiba esetén a hétvége/ünnepnap szabályra esik vissza
   registerServiceWorker();
   detectEnvironment();
 
@@ -321,16 +323,41 @@ async function resolveCloudIdentity() {
   await afterIdentityResolved();
 }
 
+let calendarReminderChecked = false;
+
+/** Munkanaptár-frissítési emlékeztető: csak admin, csak ha hiányzik a szükséges év, hetente legfeljebb
+ * egyszer. Az utolsó megjelenítés az admin felhasználói rekordjában tárolódik (szinkronizálódik), így a
+ * "hetente egyszer" több eszközön is együtt érvényes. Munkamenetenként legfeljebb egyszer ellenőrzünk. */
+async function maybeShowCalendarReminder() {
+  if (calendarReminderChecked || !state.currentUser) return;
+  calendarReminderChecked = true;
+  const cal = WorkCalendar.getWorkCalendar();
+  const due = WorkCalendar.reminderDue({
+    today: Models.todayDateStr(),
+    cal,
+    isAdmin: state.currentUser.role === 'admin',
+    lastShownAt: state.currentUser.calendarReminderShownAt || null,
+    now: new Date(),
+  });
+  if (!due.due) return;
+  await DB.putUser(Models.touchUser(state.currentUser, { calendarReminderShownAt: new Date().toISOString() }));
+  await loadLocalData();
+  Views.renderCalendarReminderModal({ requiredYear: due.requiredYear, startDate: cal.startDate, endDate: cal.endDate });
+}
+
 async function afterIdentityResolved() {
   const entry = await maybeAutoCheckin({
     userId: state.currentUser.id,
     deviceId: state.deviceId,
     deviceName: state.deviceName,
     breakMinutes: resolveBreakFor(state.currentUser.id, Models.todayDateStr()),
+    // csak a magyar munkanaptár szerinti munkanapon (vagy áthelyezett munkanapon) indul automatikus bejegyzés
+    isWorkingToday: WorkCalendar.isWorkingDay(Models.todayDateStr()),
   });
   if (entry) await loadLocalData();
 
   renderApp();
+  await maybeShowCalendarReminder();
 
   if (state.mode === 'cloud') {
     if (syncTimer) clearInterval(syncTimer);
@@ -415,6 +442,7 @@ function renderApp() {
 
 function renderDashboardView(content) {
   Views.renderDashboard(content, {
+    todayInfo: WorkCalendar.getDayInfo(Models.todayDateStr()),
     user: state.currentUser,
     entries: state.entries,
     syncState: state.syncState,
@@ -611,6 +639,7 @@ function openRandomModal(isAdminView) {
     isAdmin: isAdmin && isAdminView,
     defaultUserId: (isAdmin && isAdminView && state.selectedUserId) || state.currentUser.id,
     breakRulesByUser: Object.fromEntries(state.users.map((u) => [u.id, u.breakRules || []])),
+    calendarUncovered: (from, to) => WorkCalendar.uncoveredYearsInRange(from, to),
     onGenerate: async (cfg) => {
       const targetUserId = cfg.userId || state.currentUser.id;
       if (cfg.overwrite) {
@@ -752,6 +781,18 @@ function renderSettingsView(content) {
     isWindows: state.isWindows,
     breakRules: state.currentUser.breakRules || [],
     onEditBreaks: () => openBreakRulesModal(state.currentUser),
+    workCalendar: (() => {
+      const cal = WorkCalendar.getWorkCalendar();
+      const status = WorkCalendar.calendarUpdateStatus(Models.todayDateStr(), cal);
+      return {
+        loaded: !!cal,
+        loadError: WorkCalendar.getWorkCalendarLoadError(),
+        startDate: cal && cal.startDate,
+        endDate: cal && cal.endDate,
+        generatedAt: cal && cal.generatedAt,
+        missingYear: status.missing ? status.requiredYear : null,
+      };
+    })(),
     autostartCommand: buildAutostartCommand(),
     onSyncNow: () => runSync({ interactive: true }),
     onLogout: async () => { await Auth.logout(); location.reload(); },

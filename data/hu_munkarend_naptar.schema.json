@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hungarian Work Calendar",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "calendarId",
+    "countryCode",
+    "locale",
+    "timeZone",
+    "generatedAt",
+    "coverage",
+    "rules",
+    "years",
+    "workScheduleChanges",
+    "sources",
+    "days"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string"
+    },
+    "calendarId": {
+      "type": "string"
+    },
+    "countryCode": {
+      "const": "HU"
+    },
+    "locale": {
+      "type": "string"
+    },
+    "timeZone": {
+      "type": "string"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date"
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "startDate",
+        "endDate",
+        "dayCount"
+      ],
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "endDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "dayCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workScheduleScope": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "weekdayNumbering": {
+          "type": "string"
+        },
+        "statusValues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "publicHolidayRule": {
+          "type": "string"
+        },
+        "ordinaryWorkdayRule": {
+          "type": "string"
+        },
+        "transferRule": {
+          "type": "string"
+        },
+        "legalSourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "years": {
+      "type": "object",
+      "patternProperties": {
+        "^\\d{4}$": {
+          "type": "object",
+          "required": [
+            "status",
+            "scheduleSourceId",
+            "transferPairCount"
+          ],
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "scheduleSourceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "legalReference": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transferPairCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "workScheduleChanges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "scheduleYear",
+          "workingDate",
+          "restDate",
+          "sourceId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scheduleYear": {
+            "type": "integer"
+          },
+          "workingDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "restDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "legalReference": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "url",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "type": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "futureSchedule": {
+      "type": "object"
+    },
+    "days": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "date",
+          "weekday",
+          "status",
+          "categories",
+          "isWorkingDay",
+          "isRestDay",
+          "isPublicHoliday",
+          "isWeekend"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "weekday": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "status": {
+            "enum": [
+              "working_day",
+              "weekend_rest_day",
+              "public_holiday",
+              "transferred_workday",
+              "transferred_rest_day"
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isWorkingDay": {
+            "type": "boolean"
+          },
+          "isRestDay": {
+            "type": "boolean"
+          },
+          "isPublicHoliday": {
+            "type": "boolean"
+          },
+          "isWeekend": {
+            "type": "boolean"
+          },
+          "holiday": {
+            "type": "object"
+          },
+          "transfer": {
+            "type": "object"
+          },
+          "extensions": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

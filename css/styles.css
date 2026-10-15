@@ -639,7 +639,27 @@ a { color: var(--brass-600); }
 }
 .dp-cell:hover { background: var(--paper-0); border-color: var(--line); }
 .dp-cell.dp-muted { color: var(--ink-300); }
-.dp-cell.dp-weekend:not(.dp-muted) { color: var(--err-600); }
+.dp-cell { position: relative; }
+/* A magyar munkanaptár szerint: piros = nem munkanap; zöld pont = áthelyezett munkanap; piros pont = áthelyezett pihenőnap */
+.dp-cell.dp-off:not(.dp-muted) { color: var(--err-600); }
+.dp-cell.dp-swap-work::after,
+.dp-cell.dp-swap-rest::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+}
+.dp-cell.dp-swap-work::after { background: var(--ok-600); }
+.dp-cell.dp-swap-rest::after { background: var(--err-600); }
+.dp-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--ink-500); }
+.dp-key { display: inline-flex; align-items: center; gap: 5px; }
+.dp-key::before { content: ''; width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dp-key-off::before { background: var(--err-600); }
+.dp-key-work::before { background: var(--ok-600); }
 .dp-cell.dp-today { border-color: var(--brass-600); font-weight: 600; }
 .dp-cell.dp-selected { background: var(--brass-600); border-color: var(--brass-600); color: #fff; }
 .dp-footer { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -920,4 +940,17 @@ select { padding: 9px 11px; border: 1px solid var(--line-strong); border-radius:
   .break-row { grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px; }
   .break-row .break-min { grid-column: 1; }
   .break-row .icon-btn { grid-column: 2; justify-self: end; }
+}
+
+/* ---------- Munkanaptár ---------- */
+
+.day-note {
+  font-size: 13px;
+  color: var(--ink-700);
+  background: var(--paper-50);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brass-600);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 14px;
 }
