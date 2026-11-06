@@ -8,10 +8,22 @@ export const CONFIG = {
   // README → "1. lépés: Azure alkalmazás regisztráció"
   clientId: '8095ff08-cb81-4637-8953-7bf260ce8782',
 
-  // A megosztott OneDrive mappa MEGOSZTÁSI LINKJE (szerkesztési joggal!).
-  // README → "2. lépés: megosztott OneDrive mappa"
-  // Példa: 'https://1drv.ms/f/s!Abc123...' vagy '...-my.sharepoint.com/:f:/g/...'
-  sharedFolderLink: 'https://humanmachinekft24-my.sharepoint.com/:f:/g/personal/skovran_adam_humanmachine_hu/IgDyjYSct2M5RrtcCsBgzEEeATjdNrMqmWrfaOM-o6NksVA',
+  // Biztonságos, személyenként elkülönített OneDrive-tárolás.
+  // FIGYELEM: addig ne egyesítsd ezt az ágat a publikált oldalba, amíg a
+  // SECURITY-MIGRATION.md lépései (mentés, mappák, jogosultságok, import) nem készültek el.
+  storageMode: 'isolated',
+
+  // A névjegyzéknek külön mappája van. Minden dolgozó OLVASHATJA,
+  // de csak az adminisztrátor SZERKESZTHETI. A link csak "konkrét személyek" típusú lehet.
+  directoryFolderLink: 'https://humanmachinekft24-my.sharepoint.com/:f:/g/personal/skovran_adam_humanmachine_hu/IgCOfqFRs5oYRZ2jeMXciXvdAXlJTEK8gkJkgIIXITzxR3c?e=rtK4Oy',
+  directoryFileName: 'felhasznalok.json',
+
+  // A személyes mappák linkjei nem kerülnek ebbe a nyilvános GitHub-fájlba.
+  // Azokat a hozzáférésvédett felhasznalok.json névjegyzék tárolja, illetve
+  // új felhasználó felvételekor az admin űrlapján kell megadni.
+
+  // A korábbi közösen szerkeszthető fájl NEM használható a biztonságos módban.
+  sharedFolderLink: '',
 
   // A szinkronizált adatfájl neve a megosztott mappában. Alapesetben nem kell módosítani.
   dataFileName: 'jelenleti-adatok.json',

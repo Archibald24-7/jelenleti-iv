@@ -5,7 +5,12 @@
 // használható.
 // ============================================================================
 
-const DB_NAME = 'jelenleti_iv_db';
+import { CONFIG } from '../config.js';
+
+// Ne emeljünk át automatikusan minden felhasználó adatát tartalmazó, régi
+// IndexedDB-állományt az elkülönített módba. A régi adatbázis megmarad
+// visszaállításhoz, az új mód tiszta és külön tárolóból indul.
+const DB_NAME = CONFIG.storageMode === 'isolated' ? 'jelenleti_iv_isolated_v2' : 'jelenleti_iv_db';
 const DB_VERSION = 1;
 const STORE_USERS = 'users';
 const STORE_ENTRIES = 'entries';
@@ -97,6 +102,56 @@ export async function putEntry(entry) {
 
 export async function bulkPutEntries(entries) {
   return bulkPut(STORE_ENTRIES, entries);
+}
+
+/** Az engedélyezett fiókhoz tartozó teljes lokális pillanatkép atomikus cseréje.
+ * A régebbről bent maradt, más felhasználóhoz tartozó rekordokat is eltávolítja. */
+export async function replaceCloudData(users, entries, editableUserIds) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORE_USERS, STORE_ENTRIES], 'readwrite');
+    const userStore = t.objectStore(STORE_USERS);
+    const entryStore = t.objectStore(STORE_ENTRIES);
+    const allowed = new Set(editableUserIds);
+    // Közben is keletkezhet helyi (offline-first) módosítás. Ezért a tranzakció
+    // legfrissebb tartalmából is megtartjuk a még nem szinkronizált rekordokat.
+    const oldUsersRequest = userStore.getAll();
+    const oldEntriesRequest = entryStore.getAll();
+    let oldUsers = null;
+    let oldEntries = null;
+    const mergeAndReplace = () => {
+      if (!oldUsers || !oldEntries) return;
+      const nextUsers = new Map(users.map((user) => [user.id, user]));
+      for (const user of oldUsers) {
+        const remote = nextUsers.get(user.id);
+        if (!remote || !allowed.has(user.id)) continue;
+        if ((user.profileUpdatedAt || '') > (remote.profileUpdatedAt || '')) {
+          nextUsers.set(user.id, {
+            ...remote,
+            breakRules: user.breakRules,
+            calendarReminderShownAt: user.calendarReminderShownAt,
+            profileUpdatedAt: user.profileUpdatedAt,
+            updatedAt: user.updatedAt,
+          });
+        }
+      }
+      const nextEntries = new Map(entries.map((entry) => [entry.id, entry]));
+      for (const entry of oldEntries) {
+        if (!allowed.has(entry.userId)) continue;
+        const remote = nextEntries.get(entry.id);
+        if (!remote || entry.updatedAt > remote.updatedAt) nextEntries.set(entry.id, entry);
+      }
+      userStore.clear();
+      entryStore.clear();
+      for (const user of nextUsers.values()) userStore.put(user);
+      for (const entry of nextEntries.values()) entryStore.put(entry);
+    };
+    oldUsersRequest.onsuccess = () => { oldUsers = oldUsersRequest.result; mergeAndReplace(); };
+    oldEntriesRequest.onsuccess = () => { oldEntries = oldEntriesRequest.result; mergeAndReplace(); };
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('Local database transaction aborted'));
+  });
 }
 
 /** Az adott felhasználó adott napi, adott ESZKÖZRŐL (deviceId) származó automatikus

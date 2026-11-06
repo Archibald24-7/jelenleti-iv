@@ -1,5 +1,14 @@
 # Jelenléti Ív Kezelő
 
+> **BIZTONSÁGI ÁTÁLLÁS – A FEJLESZTÉSI ÁG MÉG NEM ÉLESÍTHETŐ.**
+> A korábbi, minden munkatárs által szerkeszthető közös JSON-fájl nem tudta
+> kikényszeríteni a felhasználó/admin hozzáférés-elválasztást. Az új
+> `storageMode: 'isolated'` módban minden dolgozó külön, Microsoft 365 által
+> hozzáférésvédett OneDrive-adatfájlt kap. A teljes, élesítés előtti teendőlista:
+> **[SECURITY-MIGRATION.md](SECURITY-MIGRATION.md)**.
+> Az alábbi eredeti telepítési fejezet történeti leírásként maradt meg;
+> **ne állíts be új, mindenki számára szerkeszthető közös mappát.**
+
 Cross-platform (Windows 11, Windows 10, Android, később iOS), csapatszintű jelenléti ív
 kezelő alkalmazás, megosztott OneDrive-alapú szinkronizációval, offline működéssel,
 automatikus bejegyzés-észleléssel és véletlen időpont-generátorral.
@@ -80,7 +89,7 @@ de az első éles beüzemeléskor apróbb hibák előfordulhatnak - ezekben szí
         └──────────────┬─────┴─────┬──────────────┘
                         ▼           ▼
               OneDrive – megosztott mappa
-                 (egy közös JSON adatfájl)
+              (új módban személyenként külön adatfájl)
 ```
 
 Minden eszköz a **saját Microsoft-fiókjával** jelentkezik be (MSAL.js könyvtár), és ez a
@@ -161,9 +170,10 @@ Másold be a Client ID-t a `config.js` fájlba (lásd 4. lépés).
 1. A OneDrive-odon (<https://onedrive.com>, azzal a fiókkal, amivel az 2. lépésben is
    dolgoztál) hozz létre egy mappát, pl. `JelenletiIvAdatok`.
 2. Kattints jobb gombbal → **Megosztás**.
-3. Adj **szerkesztési jogosultságot** (nem csak megtekintést!) a csapattagok e-mail
-   címeinek megadásával, VAGY válaszd az "Bárki, akinél megvan a hivatkozás" opciót,
-   ha ez elfogadható a ti környezetetekben.
+3. **Kizárólag a régi tárolási mód történeti leírása:** a korábbi verzió minden
+   csapattagnak szerkesztési jogot adott ugyanahhoz a fájlhoz. Ezt az új
+   biztonságos módban ne használd. Ne hozz létre "Bárki, akinél megvan a
+   hivatkozás" megosztást; kövesd a `SECURITY-MIGRATION.md` útmutatót.
 4. Másold ki a létrejött **megosztási linket**.
 
 Ez a link megy a `config.js`-be. Az app ebben a mappában fog létrehozni egy
@@ -189,8 +199,10 @@ Mentsd el, és ha GitHub Pages-t használsz, várj kb. 1 percet, amíg újra kö
 ### 5. lépés: első bejelentkezés
 
 Nyisd meg az app URL-jét bármelyik böngészőben. Jelentkezz be a Microsoft-fiókoddal.
-**Az elsőként bejelentkező fiók automatikusan adminisztrátor lesz** (feltéve, hogy a
-megosztott adatfájl még teljesen üres - ez az első indításnál mindig igaz).
+**Régi működés:** korábban az első bejelentkező automatikusan adminisztrátor lett.
+Az új, elkülönített módban az adminisztrátori szerepkört az előzetesen feltöltött,
+csak admin által írható `felhasznalok.json` határozza meg. Üres tárolóból
+automatikus adminlétrehozás nincs.
 
 ### 6. lépés: további felhasználók felvétele
 

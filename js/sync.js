@@ -127,25 +127,19 @@ async function getRemoteFile(folder, fileName, { interactive }) {
 
 async function putRemote(folder, fileName, data, { ifMatch = null, failIfExists = false, interactive }) {
   const qs = failIfExists ? '?@microsoft.graph.conflictBehavior=fail' : '';
-  const send = (withIfMatch) =>
+  const send = () =>
     graphFetch(`${itemPath(folder, fileName)}:/content${qs}`, {
       interactive,
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        ...(withIfMatch && ifMatch ? { 'If-Match': ifMatch } : {}),
+        ...(ifMatch ? { 'If-Match': ifMatch } : {}),
       },
       body: JSON.stringify(data),
     });
-
-  let res;
-  try {
-    res = await send(true);
-  } catch (e) {
-    // Ha a böngésző valamiért nem engedi az If-Match fejlécet (CORS), egyszer megpróbáljuk anélkül.
-    if (e instanceof TypeError && ifMatch) res = await send(false);
-    else throw e;
-  }
+  // Soha nem írunk feltétel nélkül egy már létező fájlra: a korábbi CORS
+  // fallback észrevétlenül felülírhatta másik eszköz módosításait.
+  const res = await send();
   if (!res.ok) throw httpError('REMOTE_WRITE_FAILED', res.status);
   return res.json();
 }
@@ -206,6 +200,179 @@ export function needsUpload(merged, remoteData) {
 }
 
 // ---------------------------------------------------------------------------
+// SZEMÉLYENKÉNT ELKÜLÖNÍTETT TÁROLÁS
+// A Microsoft 365 fájl-ACL-je a tényleges biztonsági határ: minden dolgozó
+// csak a saját adatfájljára kap írási jogot. A külön névjegyzéket az admin írja.
+// A böngészőben mutatott admin szerepkör önmagában NEM jogosultsági kontroll.
+// ---------------------------------------------------------------------------
+
+const DIRECTORY_FIELDS = ['id', 'email', 'name', 'role', 'active', 'deleted', 'createdAt', 'directoryUpdatedAt', 'dataFolderLink'];
+
+function normalizedEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function directoryRecord(user) {
+  if (!user || !user.id || !normalizedEmail(user.email)) throw new Error('INVALID_DIRECTORY_USER');
+  const record = {};
+  for (const field of DIRECTORY_FIELDS) {
+    if (user[field] !== undefined) record[field] = user[field];
+  }
+  record.email = normalizedEmail(record.email);
+  record.directoryUpdatedAt = user.directoryUpdatedAt || user.updatedAt || '';
+  record.updatedAt = record.directoryUpdatedAt;
+  return record;
+}
+
+export function mergeDirectoryRecords(remoteUsers, localUsers, isAdmin) {
+  const result = new Map(remoteUsers.map((user) => [user.id, directoryRecord(user)]));
+  if (isAdmin) {
+    for (const local of localUsers) {
+      if (!local.directoryUpdatedAt) continue; // csak kifejezett admin-módosítás írhat a névjegyzékbe
+      const existing = result.get(local.id);
+      if (!existing || local.directoryUpdatedAt > existing.directoryUpdatedAt) {
+        result.set(local.id, directoryRecord(local));
+      }
+    }
+  }
+  const records = [...result.values()];
+  const seen = new Set();
+  for (const user of records) {
+    if (seen.has(user.email)) throw new Error('DUPLICATE_DIRECTORY_EMAIL');
+    seen.add(user.email);
+  }
+  return records;
+}
+
+export function selectSyncUsers(directoryUsers, signedInEmail) {
+  const signedIn = directoryUsers.find((user) => !user.deleted && user.email === normalizedEmail(signedInEmail));
+  if (!signedIn || signedIn.active === false) throw new Error('ACCESS_DENIED');
+  const isAdmin = signedIn.role === 'admin';
+  return {
+    signedIn,
+    isAdmin,
+    targets: directoryUsers.filter((user) => !user.deleted && (isAdmin || user.id === signedIn.id)),
+  };
+}
+
+/** A felhasználói fájlban levő szerepkör nem megbízható: a névjegyzék
+ * felülírja az identitás- és szerepkörmezőket. Csak a saját profilbeállításai
+ * (szünet-szabályok, naptáremlékeztető) származhatnak a személyes fájlból. */
+export function mergeUserProfile(directoryUser, localUser, remoteUser) {
+  const stamp = (user) => user && (user.profileUpdatedAt || user.updatedAt) || '';
+  const profile = stamp(localUser) > stamp(remoteUser) ? localUser : (remoteUser || localUser || {});
+  const profileUpdatedAt = stamp(profile) || directoryUser.directoryUpdatedAt;
+  return {
+    ...directoryUser,
+    breakRules: normalizeBreakRules(profile.breakRules),
+    calendarReminderShownAt: profile.calendarReminderShownAt || null,
+    profileUpdatedAt,
+    updatedAt: profileUpdatedAt > directoryUser.directoryUpdatedAt ? profileUpdatedAt : directoryUser.directoryUpdatedAt,
+  };
+}
+
+/** Egy hibásan megosztott vagy szennyezett fájlból sosem emelünk át másik
+ * dolgozó bejegyzéseit. A helyi kliensnek továbbra sem szabad ACL-t helyettesítenie. */
+export function assertUserFileOwnership(data, userId) {
+  if (!data || !Array.isArray(data.users) || !Array.isArray(data.entries) ||
+      data.users.some((user) => user.id !== userId) ||
+      data.entries.some((entry) => entry.userId !== userId)) {
+    throw new Error('WRONG_USER_FILE');
+  }
+}
+
+function requireLink(url, code) {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url.trim())) throw new Error(code);
+  return url.trim();
+}
+
+async function performIsolatedSync(config, { interactive = false } = {}) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { status: 'offline', error: null, needsLogin: false };
+  }
+  try {
+    const syncStartedAt = nowISO();
+    const account = Auth.getCurrentAccount();
+    if (!account) throw new Error('NOT_LOGGED_IN');
+    const email = normalizedEmail(account.username);
+    const directoryLink = requireLink(config.directoryFolderLink, 'ISOLATED_NOT_CONFIGURED');
+    const directoryFileName = config.directoryFileName || 'felhasznalok.json';
+    const directoryFolder = await resolveSharedFolder(directoryLink, { interactive });
+    const localUsers = await DB.getAllUsers();
+    const localEntries = await DB.getAllEntries();
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const directoryRemote = await getRemoteFile(directoryFolder, directoryFileName, { interactive });
+      if (!directoryRemote || !directoryRemote.data || directoryRemote.data.entries.length !== 0) {
+        throw new Error('INVALID_DIRECTORY_FILE');
+      }
+      const directoryUsers = directoryRemote.data.users.map(directoryRecord);
+      const { signedIn, isAdmin } = selectSyncUsers(directoryUsers, email);
+      const mergedDirectory = mergeDirectoryRecords(directoryUsers, localUsers, isAdmin);
+
+      // Egy normál felhasználó kizárólag a saját fájlját olvashatja. Az admin
+      // mindegyiket olvashatja, de ezt az OneDrive ACL-nek is engednie kell.
+      const { targets } = selectSyncUsers(mergedDirectory, email);
+      const loaded = [];
+      for (const user of targets) {
+        const link = requireLink(user.dataFolderLink, 'USER_FOLDER_NOT_CONFIGURED');
+        const folder = await resolveSharedFolder(link, { interactive });
+        const remote = await getRemoteFile(folder, config.dataFileName, { interactive });
+        // Hiányzó fájlt kizárólag az admin frissen hozzáadott tagjánál
+        // inicializálunk. Régi tag hiányzó fájlját tilos üresen újra létrehozni,
+        // mert ezzel a migrációból kimaradt jelenléti adatok elveszhetnének.
+        const newMember = isAdmin && !directoryUsers.some((record) => record.id === user.id);
+        if ((!remote || !remote.data) && !newMember) throw new Error('USER_FILE_NOT_INITIALIZED');
+        if (remote && remote.data) assertUserFileOwnership(remote.data, user.id);
+        const localProfile = localUsers.find((item) => item.id === user.id);
+        const remoteProfile = remote && remote.data ? remote.data.users[0] || null : null;
+        const profile = mergeUserProfile(user, localProfile, remoteProfile);
+        const entries = mergeById(localEntries.filter((entry) => entry.userId === user.id), remote && remote.data ? remote.data.entries : []);
+        const data = { schemaVersion: SCHEMA_VERSION, users: [profile], entries, updatedAt: nowISO() };
+        const changed = needsUpload(data, remote && remote.data) ||
+          JSON.stringify(remoteProfile) !== JSON.stringify(profile);
+        loaded.push({ user, folder, remote, profile, entries, data, changed });
+      }
+
+      // Minden célfájlt és jogosultságot ellenőrzünk írás előtt.
+      try {
+        for (const item of loaded) {
+          if (item.changed) await putRemote(item.folder, config.dataFileName, item.data, {
+            ...(item.remote ? { ifMatch: item.remote.eTag } : { failIfExists: true }),
+            interactive,
+          });
+        }
+        const directoryChanged = isAdmin &&
+          JSON.stringify(mergedDirectory) !== JSON.stringify(directoryUsers);
+        if (directoryChanged) {
+          await putRemote(directoryFolder, directoryFileName,
+            { schemaVersion: SCHEMA_VERSION, users: mergedDirectory, entries: [], updatedAt: nowISO() },
+            { ifMatch: directoryRemote.eTag, interactive });
+        }
+      } catch (error) {
+        if ((error.status === 412 || error.status === 409) && attempt < MAX_ATTEMPTS) continue;
+        throw error;
+      }
+
+      const profiles = new Map(loaded.map((item) => [item.user.id, item.profile]));
+      const users = mergedDirectory.map((user) => profiles.get(user.id) || {
+        ...user, breakRules: [], calendarReminderShownAt: null, updatedAt: user.directoryUpdatedAt,
+      });
+      await DB.replaceCloudData(users, loaded.flatMap((item) => item.entries), targets.map((user) => user.id));
+      const finishedAt = nowISO();
+      // Az utolsó ellenőrzés alatt létrejött helyi módosításokat a következő
+      // szinkronnak még észlelnie kell.
+      await DB.setMeta('lastSyncedAt', syncStartedAt);
+      await DB.setMeta('verifiedAccountEmail', email);
+      return { status: 'synced', error: null, needsLogin: false, finishedAt };
+    }
+    throw httpError('REMOTE_WRITE_FAILED', 412);
+  } catch (error) {
+    return { status: 'error', error: describeError(error), needsLogin: needsRelogin(error), rawError: error };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Hibaüzenetek (magyarul, emberi nyelven)
 // ---------------------------------------------------------------------------
 
@@ -232,6 +399,19 @@ export function describeError(err) {
       return 'A megosztott adatfájl újabb alkalmazásverzióval készült. Frissítsd az alkalmazást (töltsd újra az oldalt).';
     case 'SHARE_RESOLVE_INCOMPLETE':
       return 'A megosztott mappa adatai hiányosak. Ellenőrizd a megosztási linket a config.js-ben.';
+    case 'ISOLATED_NOT_CONFIGURED':
+    case 'USER_FOLDER_NOT_CONFIGURED':
+      return 'Az elkülönített OneDrive-mappák még nincsenek teljesen beállítva a config.js-ben.';
+    case 'INVALID_DIRECTORY_FILE':
+      return 'A névjegyzékfájl hiányzik vagy nem megfelelő. Ellenőrizd az átállás lépéseit.';
+    case 'USER_FILE_NOT_INITIALIZED':
+      return 'A személyes adatfájl hiányzik. Az adminisztrátornak előbb importálnia kell a mentést.';
+    case 'WRONG_USER_FILE':
+      return 'Biztonsági hiba: a személyes fájl idegen felhasználói adatot tartalmaz.';
+    case 'ACCESS_DENIED':
+      return 'Ez a Microsoft-fiók nincs engedélyezve a céges névjegyzékben, vagy inaktív.';
+    case 'DUPLICATE_DIRECTORY_EMAIL':
+      return 'Két felhasználóhoz ugyanaz az e-mail-cím tartozik a névjegyzékben.';
   }
   const status = err.status;
   if (status === 401) return 'A bejelentkezés lejárt. Jelentkezz be újra.';
@@ -257,6 +437,7 @@ export function describeError(err) {
  * @param {{interactive?: boolean}} opts interactive=true: felhasználói kattintásra indult (felugorhat bejelentkezés)
  */
 export async function performSync(config, { interactive = false } = {}) {
+  if (config.storageMode === 'isolated') return performIsolatedSync(config, { interactive });
   const configured =
     Auth.isAuthConfigured(config.clientId) &&
     typeof config.sharedFolderLink === 'string' &&

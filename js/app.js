@@ -199,9 +199,11 @@ async function init() {
 
   const cloudConfigured =
     Auth.isAuthConfigured(CONFIG.clientId) &&
-    typeof CONFIG.sharedFolderLink === 'string' &&
-    CONFIG.sharedFolderLink.trim() !== '' &&
-    !/^IDE-/i.test(CONFIG.sharedFolderLink.trim());
+    (CONFIG.storageMode === 'isolated' || (
+      typeof CONFIG.sharedFolderLink === 'string' &&
+      CONFIG.sharedFolderLink.trim() !== '' &&
+      !/^IDE-/i.test(CONFIG.sharedFolderLink.trim())
+    ));
   state.mode = cloudConfigured ? 'cloud' : 'local';
 
   if (state.mode === 'cloud') await startCloudMode();
@@ -273,13 +275,29 @@ async function resolveCloudIdentity() {
 
   const result = await Sync.performSync(CONFIG, { interactive: false });
   state.syncState = result;
+  if (CONFIG.storageMode === 'isolated' && result.status !== 'synced') {
+    // Másik fiók korábban tárolt adataival nem engedünk hozzáférést.
+    const email = (state.account.username || '').toLowerCase();
+    const verified = await DB.getMeta('verifiedAccountEmail');
+    if (result.status !== 'offline' || verified !== email) {
+      Views.renderMessageScreen(root, {
+        title: 'Nem sikerült ellenőrizni a hozzáférést',
+        message: result.error || 'Az első bejelentkezéshez internetkapcsolat szükséges.',
+        actions: [
+          { label: 'Újrapróbálom', primary: true, onClick: () => resolveCloudIdentity() },
+          { label: 'Kijelentkezés', onClick: async () => { await Auth.logout(); location.reload(); } },
+        ],
+      });
+      return;
+    }
+  }
   await loadLocalData();
 
   const email = (state.account.username || '').toLowerCase();
   let user = state.users.find((u) => !u.deleted && u.email.toLowerCase() === email);
 
   if (!user) {
-    if (state.users.length === 0 && result.status === 'synced') {
+    if (CONFIG.storageMode !== 'isolated' && state.users.length === 0 && result.status === 'synced') {
       // Megerősítetten üres a megosztott adatbázis is - ez a csapat legelső indulása.
       const admin = Models.createUser({ name: state.account.name || email, email, role: 'admin' });
       await DB.putUser(admin);
@@ -340,7 +358,9 @@ async function maybeShowCalendarReminder() {
     now: new Date(),
   });
   if (!due.due) return;
-  await DB.putUser(Models.touchUser(state.currentUser, { calendarReminderShownAt: new Date().toISOString() }));
+  await DB.putUser(Models.touchUser(state.currentUser, {
+    calendarReminderShownAt: new Date().toISOString(), profileUpdatedAt: new Date().toISOString(),
+  }));
   await loadLocalData();
   Views.renderCalendarReminderModal({ requiredYear: due.requiredYear, startDate: cal.startDate, endDate: cal.endDate });
 }
@@ -696,7 +716,7 @@ function openBreakRulesModal(user) {
     user,
     onSave: async (rules, applyExisting) => {
       const prevUser = user;
-      const updatedUser = Models.touchUser(prevUser, { breakRules: rules });
+      const updatedUser = Models.touchUser(prevUser, { breakRules: rules, profileUpdatedAt: new Date().toISOString() });
       await DB.putUser(updatedUser);
 
       // Meglévő bejegyzések újraszámolása az új szabályok szerint (a kézzel módosítottak kimaradnak)
@@ -720,7 +740,9 @@ function openBreakRulesModal(user) {
         {
           actionLabel: 'Visszavonás',
           onAction: async () => {
-            await DB.putUser(Models.touchUser(prevUser, { breakRules: prevUser.breakRules || [] }));
+            await DB.putUser(Models.touchUser(prevUser, {
+              breakRules: prevUser.breakRules || [], profileUpdatedAt: new Date().toISOString(),
+            }));
             for (const e of changedBefore) await DB.putEntry(Models.touchEntry(e, { breakMinutes: Models.entryBreak(e) }));
             await afterMutation();
           },
@@ -733,11 +755,17 @@ function openBreakRulesModal(user) {
 function openUserModal(user) {
   Views.renderUserModal({
     user,
+    isolated: CONFIG.storageMode === 'isolated',
     onSave: async (data) => {
       if (data.id) {
         const existing = state.users.find((u) => u.id === data.id);
         if (!existing) return;
-        const updated = Models.touchUser(existing, { name: data.name, role: data.role });
+        const updated = Models.touchUser(existing, {
+          name: data.name, role: data.role,
+          ...(CONFIG.storageMode === 'isolated' ? {
+            directoryUpdatedAt: new Date().toISOString(), dataFolderLink: data.dataFolderLink,
+          } : {}),
+        });
         await DB.putUser(updated);
       } else {
         const clash = state.users.find((u) => !u.deleted && u.email.toLowerCase() === data.email.toLowerCase());
@@ -746,6 +774,10 @@ function openUserModal(user) {
           return;
         }
         const created = Models.createUser({ name: data.name, email: data.email, role: data.role });
+        if (CONFIG.storageMode === 'isolated') {
+          created.directoryUpdatedAt = created.updatedAt;
+          created.dataFolderLink = data.dataFolderLink;
+        }
         await DB.putUser(created);
       }
       await afterMutation();
@@ -757,9 +789,16 @@ async function toggleUserActive(id) {
   const existing = state.users.find((u) => u.id === id);
   if (!existing) return;
   if (existing.id === state.currentUser.id && existing.active) {
+    if (CONFIG.storageMode === 'isolated') {
+      Views.showToast('Saját adminfiókot itt nem lehet inaktiválni. Kérj másik admint, és vond vissza a OneDrive-hozzáférést.', 'error');
+      return;
+    }
     if (!window.confirm('Biztosan inaktiválod a saját fiókodat? A következő szinkron után ki fogsz jelentkezni.')) return;
   }
-  const updated = Models.touchUser(existing, { active: !existing.active });
+  const updated = Models.touchUser(existing, {
+    active: !existing.active,
+    ...(CONFIG.storageMode === 'isolated' ? { directoryUpdatedAt: new Date().toISOString() } : {}),
+  });
   await DB.putUser(updated);
   await afterMutation();
 }

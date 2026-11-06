@@ -1115,7 +1115,7 @@ export function renderBreakRulesModal({ user, onSave }) {
   });
 }
 
-export function renderUserModal({ user, onSave }) {
+export function renderUserModal({ user, isolated = false, onSave }) {
   const isNew = !user;
   const u = user || { name: '', email: '', role: 'user' };
   const { overlay, close } = openModal({
@@ -1133,6 +1133,10 @@ export function renderUserModal({ user, onSave }) {
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Adminisztrátor (mindenkié)</option>
           </select>
         </div>
+        ${isolated ? `<div class="field"><label>Saját OneDrive-mappa megosztási linkje</label>
+          <input type="url" name="dataFolderLink" value="${esc(u.dataFolderLink || '')}" required>
+          <div class="field-hint">Csak a dolgozóval és az adminisztrátorral legyen megosztva, "Konkrét személyek" jogosultsággal.</div>
+        </div>` : ''}
         <div class="form-error" hidden></div>
         <div class="form-actions">
           <button type="button" class="btn" data-close>Mégse</button>
@@ -1146,8 +1150,12 @@ export function renderUserModal({ user, onSave }) {
     const d = Object.fromEntries(new FormData(form).entries());
     if (!d.name.trim()) return showFormError(form, 'Add meg a nevet.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) return showFormError(form, 'Adj meg érvényes e-mail címet.');
+    if (isolated && !/^https:\/\//i.test(d.dataFolderLink.trim())) {
+      return showFormError(form, 'Adj meg egy HTTPS kezdetű, személyekre korlátozott OneDrive-megosztási linket.');
+    }
     close();
-    onSave({ id: user ? user.id : null, name: d.name.trim(), email: d.email.trim().toLowerCase(), role: d.role });
+    onSave({ id: user ? user.id : null, name: d.name.trim(), email: d.email.trim().toLowerCase(),
+      role: d.role, ...(isolated ? { dataFolderLink: d.dataFolderLink.trim() } : {}) });
   });
 }
 
